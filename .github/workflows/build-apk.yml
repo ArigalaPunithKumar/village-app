@@ -49,9 +49,26 @@ jobs:
           sed -i -e 's/\r$//' android/gradlew
           chmod +x android/gradlew
 
+      - name: Configure Android SDK and Accept Licenses
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > android/local.properties
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
       - name: Build Debug APK
         working-directory: android
         run: ./gradlew assembleDebug --stacktrace
+
+      - name: Dump Logs on Failure
+        if: failure()
+        run: |
+          mkdir -p debug-logs
+          find android -name "*.log" -exec cp {} debug-logs/ \; || true
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B build-failure-log
+          git add -f debug-logs/ || true
+          git commit -m "Auto-captured build failure log" || true
+          git push origin build-failure-log --force || true
 
       - name: Collect APK
         run: |
