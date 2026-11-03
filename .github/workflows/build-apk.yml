@@ -7,6 +7,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -46,17 +49,22 @@ jobs:
           ANDROID_HOME: /usr/local/lib/android/sdk
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         run: |
-          ./gradlew assembleDebug --stacktrace 2>&1 | tee build.log
-
-      - name: Upload Build Log if Failed
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gradle-build-log
-          path: android/build.log
+          ./gradlew assembleDebug --stacktrace
+          echo "=== APK Outputs ==="
+          find app/build/outputs/apk -type f -name "*.apk"
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Palle-Nestham-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: v1.0.0
+          name: "Palle Nestham v1.0.0 (Android APK)"
+          body: "Official Android APK for Palle Nestham (తండ్లం పంచాయతీ, తిరుపతి)."
+          files: android/app/build/outputs/apk/debug/*.apk
