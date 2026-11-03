@@ -33,11 +33,11 @@ jobs:
       - name: Build Web Assets
         run: npm run build
 
+      - name: Copy Assets to Android
+        run: npx cap copy android
+
       - name: Make Gradle wrapper executable
         run: chmod +x android/gradlew
-
-      - name: Sync Capacitor Android
-        run: npx cap sync android
 
       - name: Build Debug APK
         working-directory: android
