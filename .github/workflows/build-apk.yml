@@ -45,20 +45,13 @@ jobs:
 
       - name: Build Debug APK
         working-directory: android
-        env:
-          ANDROID_HOME: /usr/local/lib/android/sdk
-          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-        run: |
-          ./gradlew assembleDebug --stacktrace
-          echo "=== APK Outputs ==="
-          find app/build/outputs/apk -type f -name "*.apk"
+        run: ./gradlew assembleDebug
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Palle-Nestham-debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: warn
+          path: '**/*.apk'
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -67,4 +60,4 @@ jobs:
           tag_name: v1.0.0
           name: "Palle Nestham v1.0.0 (Android APK)"
           body: "Official Android APK for Palle Nestham (తండ్లం పంచాయతీ, తిరుపతి)."
-          files: android/app/build/outputs/apk/debug/*.apk
+          files: '**/*.apk'
