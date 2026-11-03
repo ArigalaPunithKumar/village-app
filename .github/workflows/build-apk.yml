@@ -56,19 +56,21 @@ jobs:
 
       - name: Build Debug APK
         working-directory: android
-        run: ./gradlew assembleDebug --stacktrace
+        run: |
+          set -o pipefail
+          ./gradlew assembleDebug --stacktrace 2>&1 | tee build.log
 
       - name: Dump Logs on Failure
         if: failure()
         run: |
           mkdir -p debug-logs
-          find android -name "*.log" -exec cp {} debug-logs/ \; || true
+          cp android/build.log debug-logs/error.txt || echo "No build.log found" > debug-logs/error.txt
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -B build-failure-log
-          git add -f debug-logs/ || true
-          git commit -m "Auto-captured build failure log" || true
-          git push origin build-failure-log --force || true
+          git add -f debug-logs/error.txt
+          git commit -m "Auto-captured build failure log"
+          git push origin build-failure-log --force
 
       - name: Collect APK
         run: |
