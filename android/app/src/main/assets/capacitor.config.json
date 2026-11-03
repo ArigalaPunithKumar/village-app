@@ -1,0 +1,8 @@
+{
+	"appId": "com.pallenestam.app",
+	"appName": "Palle Nestham",
+	"webDir": "dist",
+	"server": {
+		"androidScheme": "https"
+	}
+}

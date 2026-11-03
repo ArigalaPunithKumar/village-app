@@ -1,0 +1,23 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Blue circle background -->
+  <circle cx="60" cy="60" r="58" fill="#0066B3" stroke="#004C8A" stroke-width="2"/>
+  <!-- Inner white ring -->
+  <circle cx="60" cy="60" r="50" fill="none" stroke="#FFFFFF" stroke-width="2.5"/>
+
+  <!-- YSR Fan symbol - stylized hand fan (party election symbol) -->
+  <!-- Fan base arc -->
+  <path d="M30 58 Q60 28 90 58" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" fill="none"/>
+  <!-- Fan ribs -->
+  <line x1="60" y1="30" x2="60" y2="56" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="45" y1="33" x2="55" y2="56" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"/>
+  <line x1="75" y1="33" x2="65" y2="56" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"/>
+  <line x1="35" y1="40" x2="50" y2="56" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round"/>
+  <line x1="85" y1="40" x2="70" y2="56" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round"/>
+  <!-- Fan handle -->
+  <rect x="57" y="56" width="6" height="14" rx="2" fill="#FFFFFF"/>
+
+  <!-- YSR text -->
+  <text x="60" y="88" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="800" fill="#FFFFFF" letter-spacing="1">YSR</text>
+  <!-- Small Telugu subtitle hint -->
+  <text x="60" y="101" text-anchor="middle" font-family="Arial, sans-serif" font-size="7.5" font-weight="600" fill="#FFFFFF" opacity="0.8" letter-spacing="0.5">CONGRESS</text>
+</svg>
