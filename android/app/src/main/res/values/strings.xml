@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Palle Nestham</string>
+    <string name="title_activity_main">Palle Nestham</string>
+    <string name="package_name">com.pallenestam.app</string>
+    <string name="custom_url_scheme">com.pallenestam.app</string>
+</resources>
