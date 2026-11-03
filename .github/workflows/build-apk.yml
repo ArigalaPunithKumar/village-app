@@ -10,6 +10,10 @@ on:
 permissions:
   contents: write
 
+env:
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -45,13 +49,20 @@ jobs:
 
       - name: Build Debug APK
         working-directory: android
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Collect APK
+        run: |
+          mkdir -p release-apk
+          find . -name "*.apk" -exec cp {} release-apk/ \;
+          ls -la release-apk/
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Palle-Nestham-debug-apk
-          path: '**/*.apk'
+          path: release-apk/*.apk
+          if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -60,4 +71,4 @@ jobs:
           tag_name: v1.0.0
           name: "Palle Nestham v1.0.0 (Android APK)"
           body: "Official Android APK for Palle Nestham (తండ్లం పంచాయతీ, తిరుపతి)."
-          files: '**/*.apk'
+          files: release-apk/*.apk
