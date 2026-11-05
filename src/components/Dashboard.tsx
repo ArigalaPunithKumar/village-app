@@ -17,6 +17,7 @@ import {
   CheckCheck,
   Building2,
   Megaphone,
+  Radio,
 } from 'lucide-react';
 import {
   supabase,
@@ -52,7 +53,7 @@ export default function Dashboard({
   onSelectComplaint,
   isStaff = false,
   role = 'citizen',
-  userName = 'Citizen',
+  userName = 'గ్రామస్థులు',
 }: DashboardProps) {
   const [stats, setStats] = useState<Stats>({
     total: 0,
@@ -107,7 +108,7 @@ export default function Dashboard({
     loadData();
   }, []);
 
-  // Authority quick action: change status directly from dashboard
+  // Quick status change for staff
   const handleQuickStatusChange = async (
     e: React.MouseEvent,
     complaintId: number,
@@ -127,15 +128,13 @@ export default function Dashboard({
         .eq('id', complaintId);
 
       if (!updateError) {
-        // Also log status update
         await supabase.from('status_updates').insert({
           complaint_id: complaintId,
           status: newStatus,
-          note: `Status updated to ${newStatus} directly by official console.`,
+          note: `Status updated to ${newStatus} directly from official console.`,
           updated_by: userName || 'Gram Panchayat Official',
         });
 
-        // Update local state
         setRecent((prev) =>
           prev.map((c) => (c.id === complaintId ? { ...c, status: newStatus } : c))
         );
@@ -148,15 +147,15 @@ export default function Dashboard({
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-32">
-        <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
+      <div className="flex flex-col items-center justify-center py-32 space-y-3">
+        <Loader2 className="h-9 w-9 animate-spin text-emerald-600" />
+        <span className="text-xs font-bold text-slate-500">గ్రామ సమాచారం లోడ్ అవుతోంది…</span>
       </div>
     );
   }
 
   const resolveRate = stats.total > 0 ? Math.round((stats.resolved / stats.total) * 100) : 0;
 
-  // Filter complaints for authority triage
   const displayComplaints = recent.filter((c) => {
     if (actionFilter === 'urgent') return c.priority === 'urgent' || c.priority === 'high';
     if (actionFilter === 'pending') return c.status === 'pending' || c.status === 'under_review';
@@ -164,71 +163,70 @@ export default function Dashboard({
   });
 
   return (
-    <div className="space-y-4 pb-8">
+    <div className="space-y-4 pb-12 animate-fade-in">
       {/* ======================================================== */}
-      {/* 1. AUTHORITY / ADMIN CONSOLE BANNER (When isStaff=true) */}
+      {/* 1. HERO BANNER: STAFF VS CITIZEN                         */}
       {/* ======================================================== */}
       {isStaff ? (
-        <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#0c2e4f] via-[#0b3c66] to-[#124e78] p-5 text-white shadow-xl ring-1 ring-white/20">
+        <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#0c2e4f] via-[#0b3c66] to-[#124e78] p-5 text-white shadow-xl ring-1 ring-white/20 animate-slide-up">
           <div className="relative z-10">
             <div className="flex items-center justify-between">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-400 px-3 py-1 text-[11px] font-black uppercase tracking-wider text-amber-950 shadow-sm">
                 <Shield className="h-3.5 w-3.5" />
-                {role === 'admin' ? 'Admin Control Center' : 'Official Authority Console'}
+                {role === 'admin' ? 'అడ్మిన్ కంట్రోల్ డెస్క్' : 'పంచాయతీ అధికార డెస్క్'}
               </span>
-              <span className="text-[11px] font-semibold text-cyan-200">
-                Panchayat Desk · తిరుపతి
+              <span className="flex items-center gap-1 text-[11px] font-bold text-cyan-200">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-400"></span>
+                </span>
+                తండ్లం పంచాయతీ
               </span>
             </div>
 
-            <h1 className="mt-3 text-xl font-black tracking-tight text-white">
-              Grievance Operations Desk
+            <h1 className="mt-3 text-lg font-black tracking-tight text-white sm:text-xl">
+              గ్రామ సమస్యల పరిష్కార కేంద్రం
             </h1>
-            <p className="mt-1 text-xs text-cyan-100">
-              Welcome, <span className="font-bold text-amber-300">{userName}</span>. You have staff
-              clearance to inspect complaints, assign priority, and sign off resolutions.
+            <p className="mt-1 text-xs text-cyan-100 leading-relaxed">
+              నమస్కారం, <span className="font-extrabold text-amber-300">{userName}</span> గారు. సమస్యలను పరిశీలించి ప్రాధాన్యత ప్రకారం పరిష్కరించండి.
             </p>
 
-            {/* Quick action bar for officials */}
+            {/* Quick Action Filters for Officials */}
             <div className="mt-4 grid grid-cols-2 gap-2">
               <button
                 onClick={() => setActionFilter(actionFilter === 'urgent' ? 'all' : 'urgent')}
-                className={`flex items-center justify-center gap-2 rounded-2xl py-2.5 text-xs font-bold transition shadow-sm ${
+                className={`flex items-center justify-center gap-2 rounded-2xl py-2.5 px-2 text-xs font-bold transition-all active:scale-95 shadow-sm ${
                   actionFilter === 'urgent'
-                    ? 'bg-rose-500 text-white ring-2 ring-white/50'
+                    ? 'bg-rose-500 text-white ring-2 ring-white/50 scale-[1.02]'
                     : 'bg-white/15 text-white hover:bg-white/20 backdrop-blur-sm'
                 }`}
               >
                 <AlertTriangle className="h-3.5 w-3.5 text-rose-300" />
-                Urgent Escalations ({stats.urgent})
+                అత్యవసరం ({stats.urgent})
               </button>
 
               <button
                 onClick={() => setActionFilter(actionFilter === 'pending' ? 'all' : 'pending')}
-                className={`flex items-center justify-center gap-2 rounded-2xl py-2.5 text-xs font-bold transition shadow-sm ${
+                className={`flex items-center justify-center gap-2 rounded-2xl py-2.5 px-2 text-xs font-bold transition-all active:scale-95 shadow-sm ${
                   actionFilter === 'pending'
-                    ? 'bg-amber-400 text-amber-950 ring-2 ring-white/50'
+                    ? 'bg-amber-400 text-amber-950 ring-2 ring-white/50 scale-[1.02]'
                     : 'bg-white/15 text-white hover:bg-white/20 backdrop-blur-sm'
                 }`}
               >
                 <Clock className="h-3.5 w-3.5 text-amber-200" />
-                Awaiting Review ({stats.pending})
+                పరిశీలించవలసినవి ({stats.pending})
               </button>
             </div>
           </div>
-
           <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-cyan-400/10 blur-2xl" />
         </section>
       ) : (
-        /* ======================================================== */
-        /* 2. CITIZEN VIBRANT HERO BANNER (When Citizen)             */
-        /* ======================================================== */
-        <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-600 via-teal-600 to-[#0c4774] p-5 text-white shadow-xl shadow-emerald-900/10">
+        <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-600 via-teal-600 to-[#0c4774] p-5 text-white shadow-xl shadow-emerald-900/15 animate-slide-up">
           <div className="relative z-10 flex items-start gap-3.5">
-            <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white/95 p-1.5 shadow-md ring-2 ring-white/40">
+            <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white p-1.5 shadow-md ring-2 ring-white/50">
               <img
-                src="/image.png"
-                alt="Palle Nestham Services"
+                src="/palle-nestham-logo.png"
+                alt="Palle Nestham"
                 className="h-full w-full object-contain"
               />
             </div>
@@ -237,112 +235,115 @@ export default function Dashboard({
                 <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-100 backdrop-blur-sm">
                   నమస్కారం 🙏
                 </span>
-                <span className="text-[10px] text-emerald-200 font-semibold truncate">
+                <span className="text-[11px] text-emerald-100 font-bold truncate">
                   {userName}
                 </span>
               </div>
               <h1 className="mt-1 text-lg font-black leading-tight text-white">
                 మన ఊరు · మన బాధ్యత
               </h1>
-              <p className="mt-1 text-[11px] leading-relaxed text-emerald-100/90">
-                Notice an issue with roads, water, or electricity? Report it directly to your village
-                panchayat.
+              <p className="mt-0.5 text-[11px] leading-relaxed text-emerald-100">
+                రోడ్లు, తాగునీరు లేదా విద్యుత్ సమస్య ఉంటే నేరుగా గ్రామ పంచాయతీకి తెలియజేయండి.
               </p>
             </div>
           </div>
 
+          {/* Big Action Button */}
           <button
             onClick={() => onNavigate('report')}
-            className="relative z-10 mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-amber-400 to-orange-400 px-4 py-3 text-xs font-black text-amber-950 shadow-lg shadow-orange-500/25 transition-transform active:scale-[0.98]"
+            className="relative z-10 mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-amber-400 via-orange-400 to-amber-500 px-4 py-3.5 text-xs font-black text-amber-950 shadow-lg shadow-orange-500/30 transition-all duration-200 hover:opacity-95 active:scale-[0.98] animate-pulse-glow"
           >
             <Sparkles className="h-4 w-4" />
-            Report a Problem Now
+            సమస్యను నివేదించండి • Report Issue
             <ChevronRight className="h-4 w-4" />
           </button>
 
-          {/* Background decorative glows */}
           <div className="pointer-events-none absolute -right-6 -top-6 h-32 w-32 rounded-full bg-amber-300/15 blur-xl" />
-          <div className="pointer-events-none absolute -bottom-10 left-12 h-28 w-28 rounded-full bg-white/10 blur-lg" />
         </section>
       )}
 
       {/* ======================================================== */}
-      {/* 3. LIVE VILLAGE NOTICE TICKER                           */}
+      {/* 2. REAL-TIME LIVE CIVIC ANNOUNCEMENT TICKER              */}
       {/* ======================================================== */}
-      <div className="flex items-center gap-2 rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50/60 px-3.5 py-2.5 text-xs text-amber-900 shadow-sm">
-        <Megaphone className="h-4 w-4 shrink-0 text-amber-600 animate-bounce" />
-        <p className="min-w-0 flex-1 truncate text-[11px] font-semibold">
-          <span className="font-bold text-amber-800">Panchayat Update:</span> Weekly sanitation &
-          water pipeline review in progress.
+      <div className="flex items-center gap-2.5 rounded-2xl border border-emerald-200 bg-gradient-to-r from-emerald-50 via-teal-50/70 to-emerald-50 px-3.5 py-2.5 text-xs text-emerald-950 shadow-2xs">
+        <div className="relative flex h-2.5 w-2.5 shrink-0">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75"></span>
+          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-600"></span>
+        </div>
+        <p className="min-w-0 flex-1 truncate text-[11px] font-bold">
+          <span className="text-emerald-800">🔴 లైవ్ సమాచారం:</span> రామాలయం వీధిలో వీధి లైట్లు మరమ్మత్తు పూర్తయింది.
         </p>
       </div>
 
       {/* ======================================================== */}
-      {/* 4. VIBRANT COLORFUL METRICS STATS CARDS                 */}
+      {/* 3. VIBRANT COLORFUL METRICS STATS CARDS                 */}
       {/* ======================================================== */}
       <section>
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-600">
-            Village Grievance Metrics
-          </h2>
-          <span className="text-[11px] font-semibold text-emerald-700">Live Status</span>
+          <div>
+            <h2 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">
+              గ్రామ సమస్యల స్థితిగతులు • Village Metrics
+            </h2>
+          </div>
+          <span className="text-[10px] font-bold text-emerald-700">Live Status</span>
         </div>
+
         <div className="grid grid-cols-2 gap-2.5">
           {/* Total card - Indigo */}
-          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-500 to-indigo-700 p-3.5 text-white shadow-md shadow-indigo-600/20">
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-500 to-indigo-700 p-4 text-white shadow-md shadow-indigo-600/15 transition-transform active:scale-95">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-indigo-100">Total Filed</span>
+              <span className="text-[11px] font-bold text-indigo-100">మొత్తం ఫిర్యాదులు</span>
               <ClipboardList className="h-4 w-4 text-indigo-200" />
             </div>
             <p className="mt-2 text-2xl font-black">{stats.total}</p>
-            <p className="mt-0.5 text-[10px] text-indigo-200">Across all wards</p>
+            <p className="mt-0.5 text-[10px] text-indigo-200 font-medium">Total Filed</p>
           </div>
 
           {/* Pending card - Amber */}
-          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-amber-500 to-orange-600 p-3.5 text-white shadow-md shadow-amber-600/20">
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-amber-500 to-orange-600 p-4 text-white shadow-md shadow-amber-600/15 transition-transform active:scale-95">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-amber-100">Awaiting Action</span>
+              <span className="text-[11px] font-bold text-amber-100">పరిశీలనలో ఉన్నవి</span>
               <Clock className="h-4 w-4 text-amber-200" />
             </div>
             <p className="mt-2 text-2xl font-black">{stats.pending}</p>
-            <p className="mt-0.5 text-[10px] text-amber-200">Needs review</p>
+            <p className="mt-0.5 text-[10px] text-amber-200 font-medium">Under Review</p>
           </div>
 
           {/* In Progress card - Cyan/Sky */}
-          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-sky-500 to-cyan-600 p-3.5 text-white shadow-md shadow-sky-600/20">
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-sky-500 to-cyan-600 p-4 text-white shadow-md shadow-sky-600/15 transition-transform active:scale-95">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-sky-100">In Progress</span>
+              <span className="text-[11px] font-bold text-sky-100">పనులు జరుగుతున్నవి</span>
               <Wrench className="h-4 w-4 text-sky-200" />
             </div>
             <p className="mt-2 text-2xl font-black">{stats.inProgress}</p>
-            <p className="mt-0.5 text-[10px] text-sky-200">Under repair</p>
+            <p className="mt-0.5 text-[10px] text-sky-200 font-medium">In Progress</p>
           </div>
 
           {/* Resolved card - Emerald */}
-          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-500 to-teal-700 p-3.5 text-white shadow-md shadow-emerald-600/20">
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-500 to-teal-700 p-4 text-white shadow-md shadow-emerald-600/15 transition-transform active:scale-95">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-emerald-100">Resolved</span>
+              <span className="text-[11px] font-bold text-emerald-100">పరిష్కరించినవి</span>
               <CheckCircle2 className="h-4 w-4 text-emerald-200" />
             </div>
             <p className="mt-2 text-2xl font-black">{stats.resolved}</p>
-            <p className="mt-0.5 text-[10px] text-emerald-200">Successfully closed</p>
+            <p className="mt-0.5 text-[10px] text-emerald-200 font-medium">Resolved ✓</p>
           </div>
         </div>
       </section>
 
       {/* ======================================================== */}
-      {/* 5. RESOLUTION RATE PROGRESS                              */}
+      {/* 4. RESOLUTION RATE PROGRESS BAR                          */}
       {/* ======================================================== */}
-      <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+      <section className="rounded-3xl border border-slate-200/90 bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-800 shadow-2xs">
               <TrendingUp className="h-4 w-4" />
             </div>
             <div>
-              <h3 className="text-xs font-bold text-slate-900">Gram Panchayat Resolution Rate</h3>
-              <p className="text-[10px] text-slate-400">
-                {stats.resolved} of {stats.total} grievances fixed
+              <h3 className="text-xs font-bold text-slate-900">గ్రామ పంచాయతీ పరిష్కార శాతం</h3>
+              <p className="text-[10px] text-slate-500">
+                {stats.resolved} of {stats.total} సమస్యలు పరిష్కరించబడ్డాయి
               </p>
             </div>
           </div>
@@ -358,53 +359,18 @@ export default function Dashboard({
       </section>
 
       {/* ======================================================== */}
-      {/* 6. TOP CATEGORIES OVERVIEW                              */}
-      {/* ======================================================== */}
-      {categoryStats.length > 0 && (
-        <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-          <h3 className="text-xs font-bold text-slate-900">Priority Sectors</h3>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            {categoryStats.slice(0, 4).map(({ category, count }) => {
-              const meta = CATEGORY_META[category as keyof typeof CATEGORY_META];
-              return (
-                <div
-                  key={category}
-                  className="flex items-center gap-2.5 rounded-2xl bg-slate-50 p-2.5 border border-slate-100"
-                >
-                  <CategoryIcon category={category as any} size="sm" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[11px] font-bold text-slate-700">
-                      {meta?.label ?? category}
-                    </p>
-                    <p className="text-[10px] font-semibold text-slate-400">{count} reported</p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* ======================================================== */}
-      {/* 7. COMPLAINT LIST (Tailored for Staff vs. Citizen)       */}
+      {/* 5. RECENT GRIEVANCES LIST                                */}
       {/* ======================================================== */}
       <section>
-        <div className="mb-2 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-              {isStaff ? 'Official Triage Queue' : 'Recent Village Grievances'}
-            </h2>
-            {isStaff && actionFilter !== 'all' && (
-              <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[9px] font-bold text-rose-800">
-                Filtered: {actionFilter}
-              </span>
-            )}
-          </div>
+        <div className="mb-2.5 flex items-center justify-between">
+          <h2 className="text-xs font-extrabold uppercase tracking-wider text-slate-800">
+            {isStaff ? 'అధికారుల పరిశీలన లిస్ట్ (Triage)' : 'తాజా ఫిర్యాదులు • Recent Issues'}
+          </h2>
           <button
             onClick={() => onNavigate('complaints')}
             className="inline-flex items-center gap-0.5 text-xs font-bold text-emerald-700 hover:underline"
           >
-            View all
+            అన్నీ చూడండి (View all)
             <ChevronRight className="h-3.5 w-3.5" />
           </button>
         </div>
@@ -412,7 +378,7 @@ export default function Dashboard({
         {displayComplaints.length === 0 ? (
           <div className="rounded-3xl border border-slate-200 bg-white py-10 text-center">
             <ClipboardList className="mx-auto h-8 w-8 text-slate-300" />
-            <p className="mt-2 text-xs font-semibold text-slate-400">No complaints found.</p>
+            <p className="mt-2 text-xs font-semibold text-slate-400">ప్రస్తుతం సమస్యలు లేవు.</p>
           </div>
         ) : (
           <div className="space-y-2.5">
@@ -420,7 +386,7 @@ export default function Dashboard({
               <div
                 key={c.id}
                 onClick={() => onSelectComplaint(c.id)}
-                className="group relative cursor-pointer rounded-3xl border border-slate-200 bg-white p-3.5 shadow-sm transition hover:border-emerald-300 hover:shadow-md active:scale-[0.99]"
+                className="group relative cursor-pointer rounded-3xl border border-slate-200/90 bg-white p-4 shadow-sm transition-all duration-200 hover:border-emerald-400 hover:shadow-md active:scale-[0.99]"
               >
                 <div className="flex items-start gap-3">
                   <CategoryIcon category={c.category} size="sm" />
@@ -434,28 +400,26 @@ export default function Dashboard({
 
                     <p className="line-clamp-1 mt-1 text-[11px] text-slate-500">{c.description}</p>
 
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-slate-400">
-                      <span className="font-mono font-bold text-slate-600 bg-slate-100 rounded px-1.5 py-0.5">
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
+                      <span className="font-mono font-bold text-slate-700 bg-slate-100 rounded px-1.5 py-0.5">
                         {c.ticket_number}
                       </span>
                       {c.location && (
-                        <span className="inline-flex items-center gap-0.5 truncate max-w-[150px]">
+                        <span className="inline-flex items-center gap-1 truncate max-w-[160px] font-semibold text-emerald-800">
                           <MapPin className="h-3 w-3 text-emerald-600 shrink-0" />
                           {c.location}
                         </span>
                       )}
-                      <span className="inline-flex items-center gap-0.5">
-                        <ThumbsUp className="h-3 w-3 text-slate-400" />
+                      <span className="inline-flex items-center gap-0.5 ml-auto text-slate-400">
+                        <ThumbsUp className="h-3 w-3" />
                         {c.upvotes}
                       </span>
                     </div>
 
-                    {/* OFFICIAL QUICK ACTIONS (Only visible to officials/admins) */}
+                    {/* Official Quick Action Buttons */}
                     {isStaff && (
-                      <div className="mt-3 flex items-center gap-1.5 border-t border-slate-100 pt-2.5">
-                        <span className="text-[10px] font-bold text-slate-400 mr-1">
-                          Official Action:
-                        </span>
+                      <div className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-2.5">
+                        <span className="text-[10px] font-bold text-slate-400">చర్య:</span>
 
                         {c.status !== 'in_progress' && c.status !== 'resolved' && (
                           <button
@@ -464,7 +428,7 @@ export default function Dashboard({
                             onClick={(e) => handleQuickStatusChange(e, c.id, 'in_progress')}
                             className="rounded-xl bg-sky-50 px-2.5 py-1 text-[10px] font-bold text-sky-700 hover:bg-sky-100 active:scale-95 disabled:opacity-50"
                           >
-                            Mark In Progress
+                            పనులు ప్రారంభించు (In Progress)
                           </button>
                         )}
 
@@ -475,13 +439,9 @@ export default function Dashboard({
                             onClick={(e) => handleQuickStatusChange(e, c.id, 'resolved')}
                             className="rounded-xl bg-emerald-50 px-2.5 py-1 text-[10px] font-bold text-emerald-700 hover:bg-emerald-100 active:scale-95 disabled:opacity-50"
                           >
-                            Mark Resolved ✓
+                            పరిష్కారమైంది ✓ (Resolve)
                           </button>
                         )}
-
-                        <span className="ml-auto inline-flex items-center text-[10px] font-bold text-slate-500">
-                          Inspect <ArrowUpRight className="h-3 w-3" />
-                        </span>
                       </div>
                     )}
                   </div>

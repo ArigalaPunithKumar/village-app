@@ -24,14 +24,17 @@ export default function MobileTopBar({
     <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/95 backdrop-blur-md shadow-xs">
       <div className="flex h-14 items-center gap-2.5 px-4">
         {/* App Logo */}
-        <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-700 shadow-sm ring-1 ring-emerald-600/20">
-          <img src="/image.png" alt="Palle Nestham" className="h-full w-full object-contain p-0.5" />
+        <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-700 shadow-sm ring-2 ring-white">
+          <img src="/palle-nestham-logo.png" alt="Palle Nestham" className="h-full w-full object-contain" />
         </div>
 
         {/* Title & Screen */}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <span className="text-[13px] font-black leading-tight text-slate-900">Palle Nestham</span>
+            <span className="text-[13px] font-black leading-tight text-slate-900">పల్లె నేస్తం</span>
+            <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-extrabold text-emerald-800">
+              తండ్లం
+            </span>
             {isAuthority && (
               <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-1.5 py-0.2 text-[9px] font-black uppercase text-amber-900 border border-amber-300">
                 <Crown className="h-2 w-2" />
@@ -39,7 +42,7 @@ export default function MobileTopBar({
               </span>
             )}
           </div>
-          <div className="truncate text-[10px] font-semibold text-slate-400">{title}</div>
+          <div className="truncate text-[10px] font-semibold text-slate-500">{title}</div>
         </div>
 
         {/* Profile Avatar Button */}
