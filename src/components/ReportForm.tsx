@@ -16,6 +16,8 @@ import {
   RefreshCw,
   Copy,
   Check,
+  ShieldCheck,
+  Info,
 } from 'lucide-react';
 import {
   supabase,
@@ -51,6 +53,8 @@ const TELUGU_PRIORITY_LABELS: Record<ComplaintPriority, { en: string; te: string
   urgent: { en: 'Urgent', te: 'అత్యవసరం' },
 };
 
+type PermissionModalType = 'location' | 'camera' | 'gallery' | null;
+
 export default function ReportForm({ onSubmitted }: ReportFormProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -67,10 +71,13 @@ export default function ReportForm({ onSubmitted }: ReportFormProps) {
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsStatus, setGpsStatus] = useState<string | null>(null);
 
+  // Permission confirmation modal state
+  const [activePermissionModal, setActivePermissionModal] = useState<PermissionModalType>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
-  // 1. Auto load profile details
+  // 1. Auto load profile details (name & phone)
   useEffect(() => {
     async function loadUser() {
       const p = await fetchCurrentProfile();
@@ -82,14 +89,16 @@ export default function ReportForm({ onSubmitted }: ReportFormProps) {
     loadUser();
   }, []);
 
-  // 2. Auto detect location on mount
-  useEffect(() => {
-    detectLocation();
-  }, []);
+  // 2. Request Location Permission & Detect GPS
+  const handleRequestLocationPermission = () => {
+    setActivePermissionModal('location');
+  };
 
-  const detectLocation = () => {
+  const proceedWithLocation = () => {
+    setActivePermissionModal(null);
+
     if (!navigator.geolocation) {
-      setGpsStatus('లొకేషన్ సపోర్ట్ లేదు (Location not supported)');
+      setGpsStatus('లొకేషన్ సపోర్ట్ లేదు (Location not supported on this browser)');
       return;
     }
 
@@ -133,11 +142,31 @@ export default function ReportForm({ onSubmitted }: ReportFormProps) {
       },
       (geoErr) => {
         setGpsLoading(false);
-        setGpsStatus('లొకేషన్ ఆటోమేటిక్‌గా రాలేదు. కింద ఉన్న బాక్స్‌లో మీ వీధి పేరు రాయండి.');
-        console.warn('Geolocation warning:', geoErr);
+        setGpsStatus('లొకేషన్ అనుమతి నిరాకరించబడింది. మీరు మీ వీధి పేరును నేరుగా కింద రాయవచ్చు.');
+        console.warn('Geolocation denied or unavailable:', geoErr);
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );
+  };
+
+  // 3. Request Camera Permission
+  const handleRequestCameraPermission = () => {
+    setActivePermissionModal('camera');
+  };
+
+  const proceedWithCamera = () => {
+    setActivePermissionModal(null);
+    cameraInputRef.current?.click();
+  };
+
+  // 4. Request Gallery Permission
+  const handleRequestGalleryPermission = () => {
+    setActivePermissionModal('gallery');
+  };
+
+  const proceedWithGallery = () => {
+    setActivePermissionModal(null);
+    fileInputRef.current?.click();
   };
 
   // Image compressor & reader
@@ -361,7 +390,7 @@ export default function ReportForm({ onSubmitted }: ReportFormProps) {
           </div>
         </div>
 
-        {/* 3. Location - Simple Village Friendly (No complex jargon) */}
+        {/* 3. Location Section (Explicit Permission Confirmation Before Accessing GPS) */}
         <div className="rounded-3xl border border-slate-200/80 bg-white p-4 shadow-sm space-y-2.5">
           <div className="flex items-center justify-between">
             <div>
@@ -371,19 +400,19 @@ export default function ReportForm({ onSubmitted }: ReportFormProps) {
               <span className="text-[10px] text-slate-500">మీ వీధి లేదా దగ్గరలోని ల్యాండ్‌మార్క్</span>
             </div>
 
-            {/* Simple Location Refresh Button */}
+            {/* Explicit Permission Request Button */}
             <button
               type="button"
-              onClick={detectLocation}
+              onClick={handleRequestLocationPermission}
               disabled={gpsLoading}
               className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-bold text-emerald-800 shadow-2xs transition active:scale-95 disabled:opacity-50"
             >
               {gpsLoading ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-600" />
               ) : (
-                <RefreshCw className="h-3.5 w-3.5 text-emerald-600" />
+                <MapPin className="h-3.5 w-3.5 text-emerald-600" />
               )}
-              {gpsLoading ? 'చూస్తున్నాము…' : '📍 లొకేషన్ మార్చండి'}
+              {gpsLoading ? 'చూస్తున్నాము…' : '📍 లొకేషన్ గుర్తించండి'}
             </button>
           </div>
 
@@ -400,7 +429,7 @@ export default function ReportForm({ onSubmitted }: ReportFormProps) {
             />
           </div>
 
-          {gpsStatus && (
+          {gpsStatus ? (
             <div className="flex items-center gap-2 rounded-xl bg-emerald-50/90 px-3 py-1.5 text-[11px] font-bold text-emerald-900 border border-emerald-100">
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -408,17 +437,24 @@ export default function ReportForm({ onSubmitted }: ReportFormProps) {
               </span>
               <span className="truncate">{gpsStatus}</span>
             </div>
+          ) : (
+            <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-500 border border-slate-100">
+              <Info className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+              <span>
+                మీ అనుమతితో మీ లొకేషన్‌ను ఆటోమేటిక్‌గా పొందడానికి పైన ఉన్న <strong>లొకేషన్ గుర్తించండి</strong> బటన్‌ను నొక్కండి.
+              </span>
+            </div>
           )}
         </div>
 
-        {/* 4. Photo Proof (Capture or Upload with Large Touch Targets) */}
+        {/* 4. Photo Proof (Explicit Confirmation Modal Before Triggering Camera/Gallery) */}
         <div className="rounded-3xl border border-slate-200/80 bg-white p-4 shadow-sm">
           <div className="mb-2">
             <label className="block text-xs font-bold text-slate-800">
               సమస్య ఫోటో • Photo Proof <span className="text-slate-400 font-normal">(ఐచ్ఛికం)</span>
             </label>
             <p className="text-[10px] text-slate-500">
-              కెమెరాతో నేరుగా ఫోటో తీయండి లేదా గ్యాలరీ నుండి ఎంచుకోండి.
+              కెమెరా లేదా గ్యాలరీ అనుమతిని ధృవీకరించిన తర్వాత మాత్రమే ఫోటోను తీసుకోండి.
             </p>
           </div>
 
@@ -447,7 +483,7 @@ export default function ReportForm({ onSubmitted }: ReportFormProps) {
             <div className="grid grid-cols-2 gap-3 pt-1">
               <button
                 type="button"
-                onClick={() => cameraInputRef.current?.click()}
+                onClick={handleRequestCameraPermission}
                 className="flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-emerald-400 bg-emerald-50/80 p-4 text-emerald-900 transition-all hover:bg-emerald-100 active:scale-95 shadow-2xs"
               >
                 <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-md shadow-emerald-700/20">
@@ -455,13 +491,13 @@ export default function ReportForm({ onSubmitted }: ReportFormProps) {
                 </div>
                 <div className="text-center">
                   <span className="block text-xs font-black">ఫోటో తీయండి</span>
-                  <span className="text-[10px] text-emerald-700">Open Camera</span>
+                  <span className="text-[10px] text-emerald-700">Camera Permission</span>
                 </div>
               </button>
 
               <button
                 type="button"
-                onClick={() => fileInputRef.current?.click()}
+                onClick={handleRequestGalleryPermission}
                 className="flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-4 text-slate-700 transition-all hover:bg-slate-100 active:scale-95 shadow-2xs"
               >
                 <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-700 text-white shadow-md">
@@ -469,7 +505,7 @@ export default function ReportForm({ onSubmitted }: ReportFormProps) {
                 </div>
                 <div className="text-center">
                   <span className="block text-xs font-black">గ్యాలరీ నుండి</span>
-                  <span className="text-[10px] text-slate-500">From Gallery</span>
+                  <span className="text-[10px] text-slate-500">Gallery Permission</span>
                 </div>
               </button>
             </div>
@@ -578,6 +614,64 @@ export default function ReportForm({ onSubmitted }: ReportFormProps) {
           )}
         </button>
       </form>
+
+      {/* ======================================================== */}
+      {/* EXPLICIT PERMISSION CONFIRMATION MODAL                   */}
+      {/* ======================================================== */}
+      {activePermissionModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs animate-fade-in">
+          <div className="w-full max-w-sm rounded-3xl border border-emerald-100 bg-white p-5 shadow-2xl animate-slide-up">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-800 shadow-xs">
+                {activePermissionModal === 'location' && <MapPin className="h-6 w-6" />}
+                {activePermissionModal === 'camera' && <Camera className="h-6 w-6" />}
+                {activePermissionModal === 'gallery' && <UploadCloud className="h-6 w-6" />}
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-slate-900">
+                  {activePermissionModal === 'location' && 'లొకేషన్ అనుమతి • Location Access'}
+                  {activePermissionModal === 'camera' && 'కెమెరా అనుమతి • Camera Access'}
+                  {activePermissionModal === 'gallery' && 'గ్యాలరీ అనుమతి • Gallery Access'}
+                </h3>
+                <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">
+                  Permission Confirmation
+                </span>
+              </div>
+            </div>
+
+            <p className="text-xs leading-relaxed text-slate-600">
+              {activePermissionModal === 'location' &&
+                'మీరు ఉన్న గ్రామ వీధి లేదా ల్యాండ్‌మార్క్‌ను ఖచ్చితంగా గుర్తించడానికి మాత్రమే లొకేషన్ అనుమతిని అడుగుతున్నాము. దీని ద్వారా సమస్య ఉన్న ప్రదేశం అధికారులకు వెంటనే తెలుస్తుంది.'}
+              {activePermissionModal === 'camera' &&
+                'సమస్యను స్పష్టంగా చూపించడానికి ఫోటో తీయడానికి మీ డివైస్ కెమెరాను తెరవడానికి అనుమతించండి.'}
+              {activePermissionModal === 'gallery' &&
+                'మీ డివైస్ స్టోరేజ్ నుండి సమస్య ఫోటోను ఎంచుకోవడానికి అనుమతిని ధృవీకరించండి.'}
+            </p>
+
+            <div className="mt-5 grid grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => setActivePermissionModal(null)}
+                className="rounded-xl border border-slate-200 bg-slate-50 py-2.5 text-xs font-bold text-slate-700 transition active:scale-95"
+              >
+                రద్దు చేయండి (Cancel)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (activePermissionModal === 'location') proceedWithLocation();
+                  if (activePermissionModal === 'camera') proceedWithCamera();
+                  if (activePermissionModal === 'gallery') proceedWithGallery();
+                }}
+                className="rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 py-2.5 text-xs font-black text-white shadow-md shadow-emerald-700/20 transition active:scale-95"
+              >
+                ✓ అనుమతించండి (Allow)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -631,7 +725,7 @@ export function ReportSuccess({
             className="rounded-xl bg-white p-2 text-slate-600 shadow-xs border border-slate-200 hover:text-emerald-700 active:scale-90"
             title="Copy Ticket"
           >
-            {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+            {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4 text-slate-600" />}
           </button>
         </div>
         <p className="mt-2 text-[11px] text-slate-500">
