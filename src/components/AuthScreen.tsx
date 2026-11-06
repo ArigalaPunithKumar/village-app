@@ -9,7 +9,12 @@ interface AuthScreenProps {
 type AuthMode = 'signin' | 'signup';
 type Gender = 'female' | 'male' | 'other' | 'prefer_not_to_say';
 
-const cleanPhone = (value: string) => value.replace(/\D/g, '').slice(0, 10);
+const cleanPhone = (value: string) => {
+  const digits = value.replace(/\D/g, '');
+  if (digits.length > 10 && digits.startsWith('91')) return digits.slice(2, 12);
+  if (digits.length === 11 && digits.startsWith('0')) return digits.slice(1);
+  return digits.slice(0, 10);
+};
 
 export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
   const [authMode, setAuthMode] = useState<AuthMode>('signin');
@@ -175,7 +180,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                       <div><label htmlFor="resident-gender" className="field-label">Gender</label><select id="resident-gender" value={gender} onChange={(event) => setGender(event.target.value as Gender | '')} className="auth-input mt-2" required><option value="" disabled>Select</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option><option value="prefer_not_to_say">Prefer not to say</option></select></div>
                     </div>
                   </>}
-                  <div><label htmlFor="login-phone" className="field-label">Mobile number</label><div className="relative mt-2"><Phone className="field-icon" /><span className="absolute left-10 top-1/2 -translate-y-1/2 text-sm font-medium text-slate-500">+91</span><input id="login-phone" type="tel" inputMode="numeric" autoComplete="tel-national" maxLength={10} value={phone} onChange={(event) => setPhone(cleanPhone(event.target.value))} placeholder="10-digit number" className="auth-input pl-[4.6rem]" required /></div><p className="mt-2 text-xs leading-5 text-slate-500">We’ll send a one-time verification code by SMS.</p></div>
+                  <div><label htmlFor="login-phone" className="field-label">Mobile number</label><div className="mt-2 flex gap-2"><span aria-hidden="true" className="flex shrink-0 items-center rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-600">+91</span><div className="relative min-w-0 flex-1"><Phone className="field-icon" /><input id="login-phone" type="tel" inputMode="numeric" autoComplete="tel-national" maxLength={16} value={phone} onChange={(event) => setPhone(cleanPhone(event.target.value))} placeholder="10-digit number" className="auth-input" required /></div></div><p className="mt-2 text-xs leading-5 text-slate-500">We’ll send a one-time verification code by SMS.</p></div>
                   <button type="submit" disabled={busy} className="primary-auth-button">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}{busy ? 'Sending code…' : 'Send OTP'}</button>
                 </form>
               ) : (
