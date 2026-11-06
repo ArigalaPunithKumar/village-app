@@ -22,7 +22,6 @@ import AdminConsole from '@/components/AdminConsole';
 import AuthScreen from '@/components/AuthScreen';
 import SplashScreen from '@/components/SplashScreen';
 import { supabase, fetchCurrentProfile, isSupabaseConfigured, type UserProfile, type UserRole } from '@/lib/supabase';
-import { setupNativeAuthDeepLinks } from '@/lib/nativeAuth';
 
 type Screen =
   | { view: 'dashboard' }
@@ -116,8 +115,6 @@ export default function App() {
       listener.subscription.unsubscribe();
     };
   }, [loadUserData]);
-
-  useEffect(() => isSupabaseConfigured ? setupNativeAuthDeepLinks() : undefined, []);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();

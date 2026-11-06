@@ -154,6 +154,8 @@ export type UserRole = 'citizen' | 'official' | 'admin';
 export interface UserProfile {
   id: string;
   display_name: string;
+  age: number | null;
+  gender: string | null;
   phone: string;
   email: string;
   role: UserRole;
@@ -176,18 +178,20 @@ export async function fetchCurrentProfile(): Promise<UserProfile | null> {
   const user = authData?.user;
   if (authError || !user) return null;
 
-  let profileData: { display_name: string; phone: string; email: string; role: UserRole } | null = null;
+  let profileData: { display_name: string; age: number | null; gender: string | null; phone: string; email: string; role: UserRole } | null = null;
   let adminAccessStatus: UserProfile['admin_access_status'] = null;
   try {
     const { data, error } = await supabase
       .from('profiles')
-      .select('display_name, phone, email, role')
+      .select('display_name, age, gender, phone, email, role')
       .eq('id', user.id)
       .maybeSingle();
     if (error) throw error;
     if (data) {
       profileData = {
         display_name: data.display_name || '',
+        age: data.age ?? null,
+        gender: data.gender || null,
         phone: data.phone || '',
         email: data.email || '',
         role: data.role as UserRole,
@@ -209,6 +213,8 @@ export async function fetchCurrentProfile(): Promise<UserProfile | null> {
   const profile: UserProfile = {
     id: user.id,
     display_name: profileData?.display_name || meta.display_name || meta.full_name || meta.name || '',
+    age: profileData?.age ?? (Number.isInteger(Number(meta.age)) ? Number(meta.age) : null),
+    gender: profileData?.gender || (typeof meta.gender === 'string' ? meta.gender : null),
     phone: profileData?.phone || meta.phone || user.phone || '',
     email: profileData?.email || user.email || '',
     role: resolvedRole === 'admin' || resolvedRole === 'official' ? resolvedRole : 'citizen',
@@ -224,17 +230,19 @@ export async function fetchCurrentProfile(): Promise<UserProfile | null> {
 
 export async function saveProfileDetails(
   userId: string,
-  updates: { display_name?: string; phone?: string }
+  updates: { display_name?: string; age?: number | null; gender?: string | null }
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const profileUpdates: { display_name?: string; phone?: string } = {};
+    const profileUpdates: { display_name?: string; age?: number | null; gender?: string | null } = {};
     if (updates.display_name !== undefined) profileUpdates.display_name = updates.display_name;
-    if (updates.phone !== undefined) profileUpdates.phone = updates.phone;
+    if (updates.age !== undefined) profileUpdates.age = updates.age;
+    if (updates.gender !== undefined) profileUpdates.gender = updates.gender;
 
     const { error: metaError } = await supabase.auth.updateUser({
       data: {
         ...(updates.display_name !== undefined ? { display_name: updates.display_name } : {}),
-        ...(updates.phone !== undefined ? { phone: updates.phone } : {}),
+        ...(updates.age !== undefined ? { age: updates.age } : {}),
+        ...(updates.gender !== undefined ? { gender: updates.gender } : {}),
       },
     });
     if (metaError) return { success: false, error: metaError.message };

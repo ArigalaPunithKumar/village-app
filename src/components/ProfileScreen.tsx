@@ -2,14 +2,10 @@ import { useState, useEffect } from 'react';
 import {
   User,
   Phone,
-  Mail,
   ShieldCheck,
-  KeyRound,
   CheckCircle2,
   AlertCircle,
   Loader2,
-  Eye,
-  EyeOff,
   LogOut,
   Crown,
   Save,
@@ -39,18 +35,11 @@ export default function ProfileScreen({ onSignOut, onOpenAdmin }: ProfileScreenP
 
   // Edit details state
   const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
+  const [age, setAge] = useState('');
+  const [gender, setGender] = useState('');
   const [savingDetails, setSavingDetails] = useState(false);
   const [detailsSuccess, setDetailsSuccess] = useState<string | null>(null);
   const [detailsError, setDetailsError] = useState<string | null>(null);
-
-  // Password update state
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [updatingPassword, setUpdatingPassword] = useState(false);
-  const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
-  const [passwordError, setPasswordError] = useState<string | null>(null);
 
   // Complaints count
   const [complaintCount, setComplaintCount] = useState<number>(0);
@@ -69,7 +58,8 @@ export default function ProfileScreen({ onSignOut, onOpenAdmin }: ProfileScreenP
         if (!active) return;
         setProfile(p);
         setName(p.display_name || '');
-        setPhone(p.phone || '');
+        setAge(p.age?.toString() || '');
+        setGender(p.gender || '');
 
         const [{ count }, requests] = await Promise.all([
           supabase
@@ -101,54 +91,30 @@ export default function ProfileScreen({ onSignOut, onOpenAdmin }: ProfileScreenP
       return;
     }
 
-    const cleanPhone = phone.replace(/\D/g, '');
-    if (cleanPhone.length !== 10) {
-      setDetailsError('Please enter a valid 10-digit mobile number.');
+    const numericAge = Number(age);
+    if (!Number.isInteger(numericAge) || numericAge < 1 || numericAge > 120) {
+      setDetailsError('Enter an age between 1 and 120.');
+      return;
+    }
+    if (!gender) {
+      setDetailsError('Select a gender option.');
       return;
     }
 
     setSavingDetails(true);
     const res = await saveProfileDetails(profile.id, {
       display_name: name.trim(),
-      phone: cleanPhone,
+      age: numericAge,
+      gender,
     });
     setSavingDetails(false);
 
     if (res.success) {
-      setProfile((prev) => (prev ? { ...prev, display_name: name.trim(), phone: cleanPhone } : null));
+      setProfile((prev) => (prev ? { ...prev, display_name: name.trim(), age: numericAge, gender } : null));
       setDetailsSuccess('Profile details saved successfully!');
       setTimeout(() => setDetailsSuccess(null), 4000);
     } else {
       setDetailsError(res.error || 'Failed to update details.');
-    }
-  };
-
-  const handleUpdatePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPasswordError(null);
-    setPasswordSuccess(null);
-
-    if (newPassword.length < 8) {
-      setPasswordError('Password must be at least 8 characters long.');
-      return;
-    }
-
-    if (newPassword !== confirmPassword) {
-      setPasswordError('Passwords do not match. Please re-enter.');
-      return;
-    }
-
-    setUpdatingPassword(true);
-    const { error } = await supabase.auth.updateUser({ password: newPassword });
-    setUpdatingPassword(false);
-
-    if (error) {
-      setPasswordError(error.message || 'Could not update password.');
-    } else {
-      setPasswordSuccess('Password updated successfully!');
-      setNewPassword('');
-      setConfirmPassword('');
-      setTimeout(() => setPasswordSuccess(null), 4000);
     }
   };
 
@@ -207,7 +173,7 @@ export default function ProfileScreen({ onSignOut, onOpenAdmin }: ProfileScreenP
                 </span>
               )}
             </div>
-            <p className="mt-0.5 text-xs text-emerald-100/90">{profile?.email || 'Registered Citizen'}</p>
+            <p className="mt-0.5 text-xs text-emerald-100/90">Mobile verified account</p>
             <div className="mt-2 flex items-center gap-2 text-[11px] font-semibold text-emerald-100">
               <span className="rounded-md bg-white/15 px-2 py-0.5 backdrop-blur-sm">
                 +91 {profile?.phone || 'Not registered'}
@@ -288,7 +254,7 @@ export default function ProfileScreen({ onSignOut, onOpenAdmin }: ProfileScreenP
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-xs font-bold text-slate-900">{req.display_name}</p>
-                      <p className="text-[10px] text-slate-500">+91 {req.phone} · {req.email}</p>
+                      <p className="text-[10px] text-slate-500">+91 {req.phone}</p>
                     </div>
                     <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md">
                       Awaiting Action
@@ -358,119 +324,32 @@ export default function ProfileScreen({ onSignOut, onOpenAdmin }: ProfileScreenP
             </div>
           </div>
 
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-700">
-              Mobile Number <span className="text-rose-500">*</span>
-            </label>
-            <div className="flex gap-2">
-              <span className="flex items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 px-3 text-xs font-bold text-slate-600">
-                +91
-              </span>
-              <div className="relative flex-1">
-                <Phone className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="tel"
-                  maxLength={10}
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
-                  placeholder="10-digit mobile number"
-                  className="w-full rounded-2xl border border-slate-200 py-2.5 pl-10 pr-3.5 text-sm font-medium text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-                  required
-                />
-              </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label htmlFor="profile-age" className="mb-1 block text-xs font-semibold text-slate-700">Age</label>
+              <input id="profile-age" type="number" min={1} max={120} value={age} onChange={(event) => setAge(event.target.value)} className="w-full rounded-2xl border border-slate-200 px-3.5 py-2.5 text-sm font-medium text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100" required />
+            </div>
+            <div>
+              <label htmlFor="profile-gender" className="mb-1 block text-xs font-semibold text-slate-700">Gender</label>
+              <select id="profile-gender" value={gender} onChange={(event) => setGender(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-medium text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100" required>
+                <option value="">Select</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option><option value="prefer_not_to_say">Prefer not to say</option>
+              </select>
             </div>
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-700">Email Address</label>
-            <div className="relative">
-              <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                type="email"
-                value={profile?.email || ''}
-                disabled
-                className="w-full rounded-2xl border border-slate-200 bg-slate-100 py-2.5 pl-10 pr-3.5 text-sm font-medium text-slate-500 cursor-not-allowed"
-              />
-            </div>
+            <label className="mb-1 block text-xs font-semibold text-slate-700">Verified mobile number</label>
+            <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm font-medium text-slate-600"><Phone className="h-4 w-4 text-slate-400" />+91 {profile?.phone || 'Not registered'}</div>
+            <p className="mt-1 text-[11px] text-slate-500">To change your number, complete OTP verification with the new number.</p>
           </div>
 
           <button
             type="submit"
-            disabled={savingDetails || !name.trim() || phone.length !== 10}
+            disabled={savingDetails || !name.trim() || !age || !gender}
             className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-700 py-3 text-sm font-bold text-white shadow-md transition hover:bg-emerald-800 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {savingDetails ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             {savingDetails ? 'Saving…' : 'Save Details'}
-          </button>
-        </form>
-      </section>
-
-      {/* Change Password */}
-      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex items-center gap-2">
-          <KeyRound className="h-4 w-4 text-emerald-600" />
-          <h2 className="text-sm font-bold text-slate-900">Change Password</h2>
-        </div>
-
-        {passwordSuccess && (
-          <div className="mt-3 flex items-center gap-2 rounded-2xl bg-emerald-50 px-3.5 py-2.5 text-xs font-semibold text-emerald-800 border border-emerald-200">
-            <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-            {passwordSuccess}
-          </div>
-        )}
-
-        {passwordError && (
-          <div className="mt-3 flex items-center gap-2 rounded-2xl bg-rose-50 px-3.5 py-2.5 text-xs font-semibold text-rose-800 border border-rose-200">
-            <AlertCircle className="h-4 w-4 text-rose-600 shrink-0" />
-            {passwordError}
-          </div>
-        )}
-
-        <form onSubmit={handleUpdatePassword} className="mt-4 space-y-3.5">
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-700">
-              New Password <span className="text-rose-500">*</span>
-            </label>
-            <div className="relative">
-              <input
-                type={showPassword ? 'text' : 'password'}
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="At least 8 characters"
-                className="w-full rounded-2xl border border-slate-200 py-2.5 pl-3.5 pr-10 text-sm font-medium text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-                required
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400"
-              >
-                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-700">
-              Confirm Password <span className="text-rose-500">*</span>
-            </label>
-            <input
-              type={showPassword ? 'text' : 'password'}
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="Re-enter password"
-              className="w-full rounded-2xl border border-slate-200 py-2.5 px-3.5 text-sm font-medium text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-              required
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={updatingPassword || newPassword.length < 8 || !confirmPassword}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 py-3 text-sm font-bold text-white shadow-md transition hover:bg-slate-800 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {updatingPassword ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
-            {updatingPassword ? 'Updating…' : 'Update Password'}
           </button>
         </form>
       </section>

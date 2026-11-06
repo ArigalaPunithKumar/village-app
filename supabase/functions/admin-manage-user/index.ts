@@ -51,45 +51,49 @@ Deno.serve(async (request: Request) => {
     return respond(400, { error: 'Request body must be valid JSON.' });
   }
 
-  if (payload.action === 'invite') {
-    const email = typeof payload.email === 'string' ? payload.email.trim().toLowerCase() : '';
+  if (payload.action === 'create') {
     const displayName = typeof payload.display_name === 'string' ? payload.display_name.trim() : '';
     const phone = typeof payload.phone === 'string' ? payload.phone.replace(/\D/g, '') : '';
+    const age = Number(payload.age);
+    const gender = payload.gender;
     const role = payload.role;
-    if (!/^\S+@\S+\.\S+$/.test(email) || !displayName || phone.length !== 10 || !['citizen', 'official', 'admin'].includes(String(role))) {
-      return respond(400, { error: 'Provide a valid email, name, 10-digit phone number, and account role.' });
+    if (!displayName || !Number.isInteger(age) || age < 1 || age > 120 || !['female', 'male', 'other', 'prefer_not_to_say'].includes(String(gender)) || phone.length !== 10 || !['citizen', 'official', 'admin'].includes(String(role))) {
+      return respond(400, { error: 'Provide a name, age from 1 to 120, gender, 10-digit phone number, and account role.' });
     }
 
-    const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email, {
-      data: { display_name: displayName, phone },
-      ...(Deno.env.get('APP_SITE_URL') ? { redirectTo: Deno.env.get('APP_SITE_URL')! } : {}),
+    const { data, error } = await adminClient.auth.admin.createUser({
+      phone: `+91${phone}`,
+      phone_confirm: false,
+      user_metadata: { display_name: displayName, phone, age, gender },
     });
-    if (error || !data.user) return respond(400, { error: error?.message ?? 'The invitation could not be created.' });
+    if (error || !data.user) return respond(400, { error: error?.message ?? 'The account could not be created.' });
 
     const { error: profileError } = await adminClient.from('profiles').upsert({
       id: data.user.id,
       display_name: displayName,
       phone,
-      email,
+      age,
+      gender,
       role,
     });
-    if (profileError) return respond(500, { error: `Invitation was sent, but profile setup failed: ${profileError.message}` });
+    if (profileError) return respond(500, { error: `Auth account was created, but profile setup failed: ${profileError.message}` });
     return respond(200, { user_id: data.user.id });
   }
 
   if (payload.action === 'update') {
     const userId = typeof payload.user_id === 'string' ? payload.user_id : '';
-    const email = typeof payload.email === 'string' ? payload.email.trim().toLowerCase() : '';
     const displayName = typeof payload.display_name === 'string' ? payload.display_name.trim() : '';
     const phone = typeof payload.phone === 'string' ? payload.phone.replace(/\D/g, '') : '';
+    const age = Number(payload.age);
+    const gender = payload.gender;
     const role = payload.role;
-    if (!userId || !/^\S+@\S+\.\S+$/.test(email) || !displayName || phone.length !== 10 || !['citizen', 'official', 'admin'].includes(String(role))) {
-      return respond(400, { error: 'Provide a user ID, valid email, name, 10-digit phone number, and account role.' });
+    if (!userId || !displayName || !Number.isInteger(age) || age < 1 || age > 120 || !['female', 'male', 'other', 'prefer_not_to_say'].includes(String(gender)) || phone.length !== 10 || !['citizen', 'official', 'admin'].includes(String(role))) {
+      return respond(400, { error: 'Provide a user ID, name, age from 1 to 120, gender, 10-digit phone number, and account role.' });
     }
 
     const { data: target, error: targetError } = await adminClient
       .from('profiles')
-      .select('id, role')
+      .select('id, role, phone')
       .eq('id', userId)
       .maybeSingle();
     if (targetError || !target) return respond(404, { error: 'User account not found.' });
@@ -103,15 +107,16 @@ Deno.serve(async (request: Request) => {
       if ((count ?? 0) <= 1) return respond(409, { error: 'The last administrator cannot be demoted.' });
     }
 
+    const phoneChanged = (target.phone ?? '').replace(/\D/g, '') !== phone;
     const { error: authUpdateError } = await adminClient.auth.admin.updateUserById(userId, {
-      email,
-      user_metadata: { display_name: displayName, phone },
+      ...(phoneChanged ? { phone: `+91${phone}`, phone_confirm: false } : {}),
+      user_metadata: { display_name: displayName, phone, age, gender },
     });
     if (authUpdateError) return respond(400, { error: authUpdateError.message });
 
     const { error: profileUpdateError } = await adminClient
       .from('profiles')
-      .update({ display_name: displayName, phone, email, role })
+      .update({ display_name: displayName, phone, age, gender, role })
       .eq('id', userId);
     if (profileUpdateError) return respond(500, { error: `Auth details changed, but profile sync failed: ${profileUpdateError.message}` });
     return respond(200, { user_id: userId, updated: true });

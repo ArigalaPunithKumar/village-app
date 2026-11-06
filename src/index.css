@@ -152,8 +152,7 @@ select:focus-visible {
 
 .field-trailing-button:hover { color: #14532d; background: #f0fdf4; }
 
-.primary-auth-button,
-.google-auth-button {
+.primary-auth-button {
   display: inline-flex;
   min-height: 2.9rem;
   width: 100%;
@@ -175,18 +174,8 @@ select:focus-visible {
 }
 
 .primary-auth-button:hover { background: #066447; box-shadow: 0 9px 20px rgba(8, 118, 83, .2); }
-.primary-auth-button:active,
-.google-auth-button:active { transform: scale(.985); }
-.primary-auth-button:disabled,
-.google-auth-button:disabled { cursor: not-allowed; opacity: .55; }
-
-.google-auth-button {
-  border: 1px solid #dce4de;
-  background: #fff;
-  color: #33423a;
-}
-
-.google-auth-button:hover { background: #f8faf8; border-color: #c7d2ca; }
+.primary-auth-button:active { transform: scale(.985); }
+.primary-auth-button:disabled { cursor: not-allowed; opacity: .55; }
 
 .glass-card {
   border: 1px solid rgba(226, 232, 240, .85);
