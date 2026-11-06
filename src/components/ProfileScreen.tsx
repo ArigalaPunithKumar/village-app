@@ -340,7 +340,7 @@ export default function ProfileScreen({ onSignOut, onOpenAdmin }: ProfileScreenP
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-700">Verified mobile number</label>
             <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm font-medium text-slate-600"><Phone className="h-4 w-4 text-slate-400" />+91 {profile?.phone || 'Not registered'}</div>
-            <p className="mt-1 text-[11px] text-slate-500">To change your number, complete OTP verification with the new number.</p>
+            <p className="mt-1 text-[11px] text-slate-500">Ask an administrator to update your number. You must verify the new number with OTP before signing in.</p>
           </div>
 
           <button

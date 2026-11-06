@@ -84,7 +84,7 @@ Sign-up asks for a name, age, gender, and mobile number. Login asks only for the
 - **SMS setup is external:** this repository cannot verify that phone sign-in, the SMS provider/template, or Edge Function deployment is configured in the live Supabase project.
 - **Official contacts must be verified:** the earlier seed used placeholder names, numbers, and a different village name. Replace those with confirmed Thandlam contacts before publishing the directory.
 - **Complaint moderation and anti-spam:** residents can create authenticated reports and public visitors can read the public report view. Add abuse controls, CAPTCHA or rate limits, and a moderation workflow before opening registration broadly.
-- **Existing email-only accounts:** phone-only login requires a verified phone identity in Supabase Auth. Do not automatically trust old profile phone values; those residents need a verified account migration or must sign up with OTP again.
+- **Existing accounts without a verified phone:** phone-only login requires a verified phone identity in Supabase Auth. Do not automatically trust old profile phone values; those residents need a verified account migration or must sign up with OTP again.
 - **Legacy reports:** complaints created before `reporter_user_id` was added remain visible in the redacted public view, but their owner cannot be identified for self-service access or account-deletion cleanup. Admins should review old contact data and evidence.
 - **Administrator actions need audit history:** account or directory changes are permission-checked, but a durable audit log of every admin edit/removal should be added before use by a larger organization.
 
