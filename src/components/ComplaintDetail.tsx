@@ -21,6 +21,7 @@ import {
   type ComplaintWithUpdates,
   type ComplaintStatus,
   type StatusUpdate,
+  type UserRole,
 } from '@/lib/supabase';
 import CategoryIcon from './CategoryIcon';
 import StatusBadge from './StatusBadge';
@@ -30,7 +31,7 @@ interface ComplaintDetailProps {
   complaintId: number;
   onBack: () => void;
   canUpdate: boolean;
-  updatedBy: string;
+  role: UserRole;
 }
 
 const STATUS_OPTIONS: ComplaintStatus[] = [
@@ -41,7 +42,7 @@ const STATUS_OPTIONS: ComplaintStatus[] = [
   'rejected',
 ];
 
-export default function ComplaintDetail({ complaintId, onBack, canUpdate, updatedBy }: ComplaintDetailProps) {
+export default function ComplaintDetail({ complaintId, onBack, canUpdate, role }: ComplaintDetailProps) {
   const [complaint, setComplaint] = useState<ComplaintWithUpdates | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,56 +53,82 @@ export default function ComplaintDetail({ complaintId, onBack, canUpdate, update
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [showUpdateForm, setShowUpdateForm] = useState(false);
   const [upvoted, setUpvoted] = useState(false);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
+    let active = true;
+    setImagePreviewUrl(null);
     async function load() {
-      const { data, error: err } = await supabase
-        .from('complaints')
-        .select('*, status_updates(*)')
+      const { data: publicData, error: publicError } = await supabase
+        .from('complaints_public')
+        .select('*')
         .eq('id', complaintId)
         .maybeSingle();
 
-      if (err || !data) {
+      if (publicError || !publicData) {
+        if (!active) return;
         setError('Could not find this complaint.');
         setLoading(false);
         return;
       }
-      const c = data as ComplaintWithUpdates;
+
+      const [privateResult, updateResult, authResult] = await Promise.all([
+        supabase.from('complaints').select('reporter_name, reporter_phone, reporter_user_id, image_url').eq('id', complaintId).maybeSingle(),
+        supabase.from('status_updates').select('id, complaint_id, status, note, updated_by, created_at').eq('complaint_id', complaintId).order('created_at', { ascending: true }),
+        supabase.auth.getUser(),
+      ]);
+      const privateData = privateResult.data;
+      if (!active) return;
+      const c = {
+        ...publicData,
+        ...(privateData ?? {}),
+        status_updates: (updateResult.data ?? []) as StatusUpdate[],
+      } as ComplaintWithUpdates;
       setComplaint(c);
       setNewStatus(c.status === 'pending' ? 'under_review' : c.status);
+      const isOwner = Boolean(privateData?.reporter_user_id && privateData.reporter_user_id === authResult.data.user?.id);
+      if (privateData?.image_url) {
+        if (privateData.image_url.startsWith('data:')) {
+          setImagePreviewUrl(privateData.image_url);
+        } else if (isOwner || role === 'admin') {
+          const { data: signedImage } = await supabase.storage.from('complaint-evidence').createSignedUrl(privateData.image_url, 300);
+          if (active) setImagePreviewUrl(signedImage?.signedUrl ?? null);
+        }
+      }
+      if (authResult.data.user) {
+        const { data: vote } = await supabase.from('complaint_upvotes').select('complaint_id').eq('complaint_id', complaintId).eq('user_id', authResult.data.user.id).maybeSingle();
+        if (active) setUpvoted(Boolean(vote));
+      }
       setLoading(false);
     }
     load();
-  }, [complaintId]);
+    return () => { active = false; };
+  }, [complaintId, role]);
 
   const handleStatusUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!complaint) return;
-    if (!updatedBy.trim()) {
-      setSubmitError('Your account does not have an official name yet.');
-      return;
-    }
     setSubmitting(true);
     setSubmitError(null);
 
-    const { data, error: insertError } = await supabase
-      .from('status_updates')
-      .insert({
-        complaint_id: complaint.id,
-        status: newStatus,
-        note: newNote.trim() || null,
-        updated_by: updatedBy.trim(),
-      })
-      .select('*')
-      .single();
+    const { error: insertError } = await supabase.rpc('update_complaint_status', {
+      p_complaint_id: complaint.id,
+      p_status: newStatus,
+      p_note: newNote.trim() || null,
+    });
 
-    if (insertError || !data) {
-      setSubmitError('Failed to add update. Please try again.');
+    if (insertError) {
+      setSubmitError(insertError.message || 'Failed to add update. Please try again.');
       setSubmitting(false);
       return;
     }
 
-    const update = data as StatusUpdate;
+    const { data: updates } = await supabase
+      .from('status_updates')
+      .select('id, complaint_id, status, note, updated_by, created_at')
+      .eq('complaint_id', complaint.id)
+      .order('created_at', { ascending: true });
     setComplaint((prev) => {
       if (!prev) return prev;
       return {
@@ -109,9 +136,7 @@ export default function ComplaintDetail({ complaintId, onBack, canUpdate, update
         status: newStatus,
         updated_at: new Date().toISOString(),
         resolved_at: newStatus === 'resolved' ? new Date().toISOString() : null,
-        status_updates: [...(prev.status_updates ?? []), update].sort(
-          (a, b) => +new Date(a.created_at) - +new Date(b.created_at),
-        ),
+        status_updates: (updates ?? prev.status_updates) as StatusUpdate[],
       };
     });
     setNewNote('');
@@ -121,6 +146,7 @@ export default function ComplaintDetail({ complaintId, onBack, canUpdate, update
 
   const handleUpvote = async () => {
     if (!complaint || upvoted) return;
+    setActionError(null);
     setUpvoted(true);
     const { data: nextCount, error } = await supabase.rpc('increment_complaint_upvote', {
       p_complaint_id: complaint.id,
@@ -129,6 +155,7 @@ export default function ComplaintDetail({ complaintId, onBack, canUpdate, update
       setComplaint({ ...complaint, upvotes: nextCount });
     } else {
       setUpvoted(false);
+      setActionError(error?.message || 'Could not register your support. Try again.');
     }
   };
 
@@ -163,6 +190,7 @@ export default function ComplaintDetail({ complaintId, onBack, canUpdate, update
 
   return (
     <div className="space-y-4">
+      {actionError && <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{actionError}</p>}
       {/* Back button */}
       <button
         onClick={onBack}
@@ -212,10 +240,10 @@ export default function ComplaintDetail({ complaintId, onBack, canUpdate, update
           </p>
 
           {/* Image */}
-          {complaint.image_url && (
+          {imagePreviewUrl && (
             <div className="mt-3 overflow-hidden rounded-xl border border-slate-200">
               <img
-                src={complaint.image_url}
+                src={imagePreviewUrl}
                 alt="Complaint"
                 className="max-h-60 w-full object-cover"
                 onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
@@ -228,8 +256,10 @@ export default function ComplaintDetail({ complaintId, onBack, canUpdate, update
             {complaint.location && (
               <MetaRow icon={<MapPin className="h-3.5 w-3.5" />} label="Location" value={complaint.location} />
             )}
-            <MetaRow icon={<User className="h-3.5 w-3.5" />} label="Reported By" value={complaint.reporter_name} />
-            {complaint.reporter_phone && (
+            {role === 'admin' && complaint.reporter_name && (
+              <MetaRow icon={<User className="h-3.5 w-3.5" />} label="Reported By" value={complaint.reporter_name} />
+            )}
+            {role === 'admin' && complaint.reporter_phone && (
               <div className="flex items-center justify-between">
                 <MetaRow icon={<Phone className="h-3.5 w-3.5" />} label="Phone" value={`+91 ${complaint.reporter_phone}`} />
                 <a
@@ -324,16 +354,7 @@ export default function ComplaintDetail({ complaintId, onBack, canUpdate, update
               </select>
             </div>
             <div>
-              <label className="mb-1 block text-[11px] font-medium text-slate-600">
-                Signed-in official
-              </label>
-              <input
-                type="text"
-                value={updatedBy}
-                readOnly
-                placeholder="Official account email"
-                className="w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-[13px] text-slate-600 outline-none"
-              />
+              <p className="text-[11px] text-slate-500">This update will be recorded under your staff account.</p>
             </div>
             <div>
               <label className="mb-1 block text-[11px] font-medium text-slate-600">
