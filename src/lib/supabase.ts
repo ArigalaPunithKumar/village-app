@@ -1,16 +1,24 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() ?? '';
+const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() ?? '';
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+
+// Keep an inert client available so the UI can render a setup message instead
+// of crashing when a local build has no project configuration.
+export const supabase = createClient(
+  supabaseUrl || 'https://configuration-required.supabase.co',
+  supabaseAnonKey || 'configuration_required',
+  {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
     flowType: 'pkce',
   },
-});
+  },
+);
 
 // ---- Domain types ----
 
@@ -42,9 +50,10 @@ export interface Complaint {
   priority: ComplaintPriority;
   status: ComplaintStatus;
   location: string | null;
-  reporter_name: string;
-  reporter_phone: string | null;
-  image_url: string | null;
+  reporter_name?: string;
+  reporter_phone?: string | null;
+  reporter_user_id?: string | null;
+  image_url?: string | null;
   upvotes: number;
   created_at: string;
   updated_at: string;
@@ -57,6 +66,7 @@ export interface StatusUpdate {
   status: ComplaintStatus;
   note: string | null;
   updated_by: string;
+  updated_by_user_id?: string | null;
   created_at: string;
 }
 
@@ -147,7 +157,7 @@ export interface UserProfile {
   phone: string;
   email: string;
   role: UserRole;
-  pending_admin_approval?: boolean;
+  admin_access_status?: 'pending' | 'approved' | 'rejected' | null;
   created_at?: string;
 }
 
@@ -162,90 +172,78 @@ export interface AdminApprovalRequest {
 }
 
 export async function fetchCurrentProfile(): Promise<UserProfile | null> {
-  const { data: authData } = await supabase.auth.getUser();
+  const { data: authData, error: authError } = await supabase.auth.getUser();
   const user = authData?.user;
-  if (!user) return null;
+  if (authError || !user) return null;
 
-  // Local cache fallback
-  const cachedRaw = localStorage.getItem(`palle_profile_${user.id}`);
-  const cached = cachedRaw ? JSON.parse(cachedRaw) : null;
-
-  let dbRole: UserRole = 'citizen';
-  let dbName = '';
+  let profileData: { display_name: string; phone: string; email: string; role: UserRole } | null = null;
+  let adminAccessStatus: UserProfile['admin_access_status'] = null;
   try {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('profiles')
-      .select('display_name, role')
+      .select('display_name, phone, email, role')
       .eq('id', user.id)
       .maybeSingle();
+    if (error) throw error;
     if (data) {
-      if (data.role) dbRole = data.role as UserRole;
-      if (data.display_name) dbName = data.display_name;
+      profileData = {
+        display_name: data.display_name || '',
+        phone: data.phone || '',
+        email: data.email || '',
+        role: data.role as UserRole,
+      };
     }
+
+    const { data: request, error: requestError } = await supabase
+      .from('admin_access_requests')
+      .select('status')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    if (!requestError) adminAccessStatus = request?.status ?? null;
   } catch (err) {
-    console.warn('Could not query profiles table directly', err);
+    console.warn('Could not load the account profile from Supabase', err);
   }
 
   const meta = user.user_metadata || {};
-  const isPendingAdmin = Boolean(meta.pending_admin_approval || cached?.pending_admin_approval);
-
-  // If role is admin in DB, clear pending
-  const resolvedRole = (cached?.role as UserRole) || dbRole;
-
+  const resolvedRole = profileData?.role;
   const profile: UserProfile = {
     id: user.id,
-    display_name: dbName || meta.display_name || meta.full_name || cached?.display_name || '',
-    phone: meta.phone || user.phone || cached?.phone || '',
-    email: user.email || cached?.email || '',
-    role: resolvedRole,
-    pending_admin_approval: isPendingAdmin && resolvedRole !== 'admin',
+    display_name: profileData?.display_name || meta.display_name || meta.full_name || meta.name || '',
+    phone: profileData?.phone || meta.phone || user.phone || '',
+    email: profileData?.email || user.email || '',
+    role: resolvedRole === 'admin' || resolvedRole === 'official' ? resolvedRole : 'citizen',
+    admin_access_status: adminAccessStatus,
     created_at: user.created_at,
   };
 
-  localStorage.setItem(`palle_profile_${user.id}`, JSON.stringify(profile));
+  // Remove legacy client-side role caches; role is always read from the database.
+  localStorage.removeItem(`palle_profile_${user.id}`);
+  localStorage.removeItem('palle_admin_approval_queue');
   return profile;
 }
 
 export async function saveProfileDetails(
   userId: string,
-  updates: { display_name?: string; phone?: string; role?: UserRole; pending_admin_approval?: boolean }
+  updates: { display_name?: string; phone?: string }
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    // 1. Update Auth metadata
+    const profileUpdates: { display_name?: string; phone?: string } = {};
+    if (updates.display_name !== undefined) profileUpdates.display_name = updates.display_name;
+    if (updates.phone !== undefined) profileUpdates.phone = updates.phone;
+
     const { error: metaError } = await supabase.auth.updateUser({
       data: {
         ...(updates.display_name !== undefined ? { display_name: updates.display_name } : {}),
         ...(updates.phone !== undefined ? { phone: updates.phone } : {}),
-        ...(updates.pending_admin_approval !== undefined ? { pending_admin_approval: updates.pending_admin_approval } : {}),
       },
     });
-    if (metaError) {
-      console.warn('Error updating auth user metadata:', metaError.message);
-    }
+    if (metaError) return { success: false, error: metaError.message };
 
-    // 2. Update DB profile if possible
-    if (updates.display_name !== undefined) {
-      await supabase
-        .from('profiles')
-        .update({ display_name: updates.display_name })
-        .eq('id', userId);
-    }
-
-    if (updates.role !== undefined) {
-      await supabase
-        .from('profiles')
-        .update({ role: updates.role })
-        .eq('id', userId);
-    }
-
-    // 3. Cache locally
-    const cachedRaw = localStorage.getItem(`palle_profile_${userId}`);
-    const cached = cachedRaw ? JSON.parse(cachedRaw) : {};
-    const updatedProfile = {
-      ...cached,
-      ...updates,
-    };
-    localStorage.setItem(`palle_profile_${userId}`, JSON.stringify(updatedProfile));
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .update(profileUpdates)
+      .eq('id', userId);
+    if (profileError) return { success: false, error: profileError.message };
 
     return { success: true };
   } catch (err: unknown) {
@@ -254,51 +252,32 @@ export async function saveProfileDetails(
   }
 }
 
-// Admin approval queue helpers
-export function getPendingAdminRequests(): AdminApprovalRequest[] {
-  try {
-    const raw = localStorage.getItem('palle_admin_approval_queue');
-    return raw ? JSON.parse(raw) : [];
-  } catch {
+// Administrator access requests are persisted and reviewed in Supabase.
+export async function getPendingAdminRequests(): Promise<AdminApprovalRequest[]> {
+  const { data, error } = await supabase
+    .from('admin_access_requests')
+    .select('id, user_id, display_name, phone, email, requested_at, status')
+    .eq('status', 'pending')
+    .order('requested_at', { ascending: true });
+  if (error) {
+    console.error('Could not load administrator access requests', error.message);
     return [];
   }
+  return (data ?? []) as AdminApprovalRequest[];
 }
 
-export function registerAdminApprovalRequest(req: { user_id: string; display_name: string; phone: string; email: string }) {
-  const existing = getPendingAdminRequests();
-  const filtered = existing.filter((r) => r.user_id !== req.user_id);
-  filtered.push({
-    id: `req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-    user_id: req.user_id,
-    display_name: req.display_name,
-    phone: req.phone,
-    email: req.email,
-    requested_at: new Date().toISOString(),
-    status: 'pending',
-  });
-  localStorage.setItem('palle_admin_approval_queue', JSON.stringify(filtered));
+export async function registerAdminApprovalRequest(): Promise<{ success: boolean; error?: string }> {
+  const { error } = await supabase.rpc('request_admin_access');
+  return error ? { success: false, error: error.message } : { success: true };
 }
 
-export function resolveAdminRequest(userId: string, approve: boolean): { success: boolean } {
-  const existing = getPendingAdminRequests();
-  const updated = existing.map((r) => {
-    if (r.user_id === userId) {
-      return { ...r, status: approve ? 'approved' : 'rejected' } as AdminApprovalRequest;
-    }
-    return r;
+export async function resolveAdminRequest(
+  userId: string,
+  approve: boolean
+): Promise<{ success: boolean; error?: string }> {
+  const { error } = await supabase.rpc('review_admin_access_request', {
+    p_user_id: userId,
+    p_approve: approve,
   });
-  localStorage.setItem('palle_admin_approval_queue', JSON.stringify(updated));
-
-  // If approved, update target user profile role
-  if (approve) {
-    const cachedRaw = localStorage.getItem(`palle_profile_${userId}`);
-    if (cachedRaw) {
-      const p = JSON.parse(cachedRaw);
-      p.role = 'admin';
-      p.pending_admin_approval = false;
-      localStorage.setItem(`palle_profile_${userId}`, JSON.stringify(p));
-    }
-    supabase.from('profiles').update({ role: 'admin' }).eq('id', userId).then(() => {});
-  }
-  return { success: true };
+  return error ? { success: false, error: error.message } : { success: true };
 }

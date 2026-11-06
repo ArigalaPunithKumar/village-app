@@ -12,24 +12,14 @@ import {
   AlertTriangle,
   Shield,
   Sparkles,
-  ArrowUpRight,
-  Filter,
-  CheckCheck,
-  Building2,
-  Megaphone,
-  Radio,
 } from 'lucide-react';
 import {
   supabase,
   type Complaint,
   type ComplaintStatus,
-  CATEGORY_META,
-  PRIORITY_META,
-  STATUS_META,
 } from '@/lib/supabase';
 import CategoryIcon from './CategoryIcon';
 import StatusBadge from './StatusBadge';
-import PriorityBadge from './PriorityBadge';
 import type { Tab } from './BottomTabBar';
 
 interface DashboardProps {
@@ -62,17 +52,15 @@ export default function Dashboard({
     resolved: 0,
     urgent: 0,
   });
-  const [categoryStats, setCategoryStats] = useState<{ category: string; count: number }[]>([]);
   const [recent, setRecent] = useState<Complaint[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionFilter, setActionFilter] = useState<'all' | 'urgent' | 'pending'>('all');
   const [actionBusyId, setActionBusyId] = useState<number | null>(null);
 
   const loadData = async () => {
-    const [allRes, catRes, recentRes] = await Promise.all([
-      supabase.from('complaints').select('status, priority'),
-      supabase.from('complaints').select('category'),
-      supabase.from('complaints').select('*').order('created_at', { ascending: false }).limit(10),
+    const [allRes, recentRes] = await Promise.all([
+      supabase.from('complaints_public').select('status, priority'),
+      supabase.from('complaints_public').select('*').order('created_at', { ascending: false }).limit(10),
     ]);
 
     const items = allRes.data ?? [];
@@ -88,17 +76,6 @@ export default function Dashboard({
           s.status !== 'rejected'
       ).length,
     });
-
-    const cats = (catRes.data ?? []).map((r) => r.category);
-    const catCounts = Object.entries(
-      cats.reduce<Record<string, number>>((acc, c) => {
-        acc[c] = (acc[c] ?? 0) + 1;
-        return acc;
-      }, {})
-    )
-      .map(([category, count]) => ({ category, count }))
-      .sort((a, b) => b.count - a.count);
-    setCategoryStats(catCounts);
 
     setRecent((recentRes.data ?? []) as Complaint[]);
     setLoading(false);
@@ -118,23 +95,12 @@ export default function Dashboard({
     setActionBusyId(complaintId);
 
     try {
-      const { error: updateError } = await supabase
-        .from('complaints')
-        .update({
-          status: newStatus,
-          updated_at: new Date().toISOString(),
-          ...(newStatus === 'resolved' ? { resolved_at: new Date().toISOString() } : {}),
-        })
-        .eq('id', complaintId);
-
+      const { error: updateError } = await supabase.rpc('update_complaint_status', {
+        p_complaint_id: complaintId,
+        p_status: newStatus,
+        p_note: `Status updated to ${newStatus} from the official dashboard.`,
+      });
       if (!updateError) {
-        await supabase.from('status_updates').insert({
-          complaint_id: complaintId,
-          status: newStatus,
-          note: `Status updated to ${newStatus} directly from official console.`,
-          updated_by: userName || 'Gram Panchayat Official',
-        });
-
         setRecent((prev) =>
           prev.map((c) => (c.id === complaintId ? { ...c, status: newStatus } : c))
         );

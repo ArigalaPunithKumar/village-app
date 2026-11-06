@@ -44,14 +44,22 @@ export default function ComplaintList({ onSelectComplaint }: ComplaintListProps)
   const [sortKey, setSortKey] = useState<SortKey>('newest');
   const [showFilters, setShowFilters] = useState(false);
   const [upvotedIds, setUpvotedIds] = useState<Set<number>>(new Set());
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
-      const { data, error } = await supabase
-        .from('complaints')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const [{ data, error }, { data: authData }] = await Promise.all([
+        supabase.from('complaints_public').select('*').order('created_at', { ascending: false }),
+        supabase.auth.getUser(),
+      ]);
       if (!error && data) setComplaints(data as Complaint[]);
+      if (authData.user) {
+        const { data: votes } = await supabase
+          .from('complaint_upvotes')
+          .select('complaint_id')
+          .eq('user_id', authData.user.id);
+        setUpvotedIds(new Set((votes ?? []).map((vote) => vote.complaint_id)));
+      }
       setLoading(false);
     }
     load();
@@ -80,11 +88,23 @@ export default function ComplaintList({ onSelectComplaint }: ComplaintListProps)
 
   const handleUpvote = async (id: number) => {
     if (upvotedIds.has(id)) return;
+    setActionError(null);
     setUpvotedIds((prev) => new Set(prev).add(id));
     setComplaints((prev) =>
       prev.map((c) => (c.id === id ? { ...c, upvotes: c.upvotes + 1 } : c)),
     );
-    await supabase.rpc('increment_complaint_upvote', { p_complaint_id: id });
+    const { data, error } = await supabase.rpc('increment_complaint_upvote', { p_complaint_id: id });
+    if (error) {
+      setUpvotedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      setComplaints((prev) => prev.map((c) => (c.id === id ? { ...c, upvotes: Math.max(0, c.upvotes - 1) } : c)));
+      setActionError(error.message.includes('already supported') ? 'You have already supported this report.' : error.message);
+    } else if (typeof data === 'number') {
+      setComplaints((prev) => prev.map((c) => (c.id === id ? { ...c, upvotes: data } : c)));
+    }
   };
 
   if (loading) {
@@ -97,6 +117,7 @@ export default function ComplaintList({ onSelectComplaint }: ComplaintListProps)
 
   return (
     <div className="space-y-3">
+      {actionError && <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{actionError}</p>}
       {/* Search + filter toggle */}
       <div className="flex gap-2">
         <div className="relative flex-1">

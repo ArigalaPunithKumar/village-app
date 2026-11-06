@@ -1,4 +1,4 @@
-import { LogOut, Shield, Crown, User } from 'lucide-react';
+import { LogOut, Crown, User } from 'lucide-react';
 import type { UserRole } from '@/lib/supabase';
 
 interface MobileTopBarProps {
@@ -21,7 +21,7 @@ export default function MobileTopBar({
   const isAuthority = role === 'official' || role === 'admin';
 
   return (
-    <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/95 backdrop-blur-md shadow-xs">
+    <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/95 backdrop-blur-md shadow-xs md:hidden">
       <div className="flex h-14 items-center gap-2.5 px-4">
         {/* App Logo */}
         <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-700 shadow-sm ring-2 ring-white">

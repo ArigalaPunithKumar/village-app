@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  ArrowRight,
   ArrowLeft,
+  ArrowRight,
+  AlertCircle,
+  CheckCircle2,
   Eye,
   EyeOff,
   KeyRound,
@@ -10,1129 +12,529 @@ import {
   Mail,
   Phone,
   ShieldCheck,
-  UserRound,
-  CheckCircle2,
-  AlertCircle,
-  Building2,
-  Crown,
   Sparkles,
-  ChevronDown,
-  ChevronUp,
+  UserRound,
 } from 'lucide-react';
-import {
-  supabase,
-  registerAdminApprovalRequest,
-  type UserRole,
-} from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
+import { startGoogleSignIn } from '@/lib/nativeAuth';
 
 interface AuthScreenProps {
   onAuthenticated: () => void;
 }
 
 type AuthMode = 'signin' | 'signup' | 'recovery';
+type LoginMethod = 'otp' | 'password';
+type OtpChannel = 'email' | 'phone';
+
+const cleanPhone = (value: string) => value.replace(/\D/g, '').slice(0, 10);
 
 export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
   const [authMode, setAuthMode] = useState<AuthMode>('signin');
+  const [loginMethod, setLoginMethod] = useState<LoginMethod>('otp');
+  const [otpChannel, setOtpChannel] = useState<OtpChannel>('email');
   const [otpSent, setOtpSent] = useState(false);
-
-  // Show/Hide bottom secondary Email & Password card
-  const [showPasswordSection, setShowPasswordSection] = useState(false);
-
-  // Form Fields
-  const [phone, setPhone] = useState('');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [otp, setOtp] = useState('');
-  const [selectedRole, setSelectedRole] = useState<UserRole>('citizen');
-
-  // Forgot Password / Recovery fields
+  const [recoveryStep, setRecoveryStep] = useState<1 | 2>(1);
   const [recoveryEmail, setRecoveryEmail] = useState('');
   const [recoveryOtp, setRecoveryOtp] = useState('');
-  const [recoveryNewPassword, setRecoveryNewPassword] = useState('');
-  const [recoveryConfirmPassword, setRecoveryConfirmPassword] = useState('');
-  const [showRecoveryPassword, setShowRecoveryPassword] = useState(false);
-  const [recoveryStep, setRecoveryStep] = useState<1 | 2>(1);
-
-  // Status & Feedback
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [timer, setTimer] = useState<number>(0);
+  const [message, setMessage] = useState<string | null>(null);
+  const [timer, setTimer] = useState(0);
 
-  // Countdown timer for OTP resend
   useEffect(() => {
     if (timer <= 0) return;
-    const interval = setInterval(() => {
-      setTimer((prev) => (prev > 0 ? prev - 1 : 0));
-    }, 1000);
-    return () => clearInterval(interval);
+    const timeout = window.setTimeout(() => setTimer((seconds) => Math.max(0, seconds - 1)), 1000);
+    return () => window.clearTimeout(timeout);
   }, [timer]);
 
-  const cleanPhone = (val: string) => val.replace(/\D/g, '').slice(0, 10);
-
-  // -------------------------------------------------------------
-  // 1. PRIMARY OTP SENDING (Mobile & Real-time Email Delivery)
-  // -------------------------------------------------------------
-  const handleSendOtp = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const clearFeedback = () => {
     setError(null);
     setMessage(null);
+  };
 
-    const rawPhone = cleanPhone(phone);
+  const switchMode = (nextMode: 'signin' | 'signup') => {
+    setAuthMode(nextMode);
+    setOtpSent(false);
+    setOtp('');
+    setLoginMethod('otp');
+    clearFeedback();
+  };
+
+  const handleSendOtp = async (event?: React.FormEvent) => {
+    event?.preventDefault();
+    clearFeedback();
     const cleanEmail = email.trim().toLowerCase();
+    const mobile = cleanPhone(phone);
 
-    // Validation
-    if (authMode === 'signup') {
-      if (!name.trim()) {
-        setError('దయచేసి మీ పూర్తి పేరు రాయండి (Please enter your full name).');
-        return;
-      }
-      if (rawPhone.length !== 10) {
-        setError('దయచేసి మీ 10 అంకెల మొబైల్ నంబర్ రాయండి (Enter valid 10-digit mobile).');
-        return;
-      }
-      if (!cleanEmail || !cleanEmail.includes('@')) {
-        setError('ఓటీపీ కోసం సరైన ఈమెయిల్ రాయండి (Enter a valid email for OTP).');
-        return;
-      }
-    } else {
-      // In signin: mobile or email
-      if (rawPhone.length !== 10 && (!cleanEmail || !cleanEmail.includes('@'))) {
-        setError('దయచేసి మీ 10 అంకెల మొబైల్ నంబర్ రాయండి (Enter your 10-digit mobile number).');
-        return;
-      }
+    if (authMode === 'signup' && !name.trim()) {
+      setError('Enter your full name to create an account.');
+      return;
+    }
+    if (authMode === 'signup' && mobile.length !== 10) {
+      setError('Enter a valid 10-digit Indian mobile number.');
+      return;
+    }
+    if (otpChannel === 'email' && !/^\S+@\S+\.\S+$/.test(cleanEmail)) {
+      setError('Enter a valid email address.');
+      return;
+    }
+    if (otpChannel === 'phone' && mobile.length !== 10) {
+      setError('Enter a valid 10-digit Indian mobile number.');
+      return;
     }
 
     setBusy(true);
-
     try {
-      // If email is provided (or in signup), send real-time 6-digit OTP
-      if (cleanEmail && cleanEmail.includes('@')) {
-        const { error: otpError } = await supabase.auth.signInWithOtp({
-          email: cleanEmail,
-          options: {
-            data: {
-              display_name: name.trim() || undefined,
-              phone: rawPhone || undefined,
-              requested_role: selectedRole,
-            },
-          },
-        });
+      const options = {
+        shouldCreateUser: authMode === 'signup',
+        data: {
+          ...(authMode === 'signup' ? { display_name: name.trim(), phone: mobile } : {}),
+        },
+      };
+      const result = otpChannel === 'email'
+        ? await supabase.auth.signInWithOtp({ email: cleanEmail, options })
+        : await supabase.auth.signInWithOtp({
+            phone: `+91${mobile}`,
+            options: { ...options, channel: 'sms' },
+          });
 
-        setBusy(false);
-
-        if (otpError) {
-          setError(otpError.message);
-          return;
-        }
-
-        setOtpSent(true);
-        setTimer(60);
-        setMessage(`మీకు 6 అంకెల ఓటీపీ కోడ్ పంపించాము (${cleanEmail}). ఇన్బాక్స్ చూడండి.`);
-        return;
-      }
-
-      // If mobile only was entered: attempt SMS
-      const fullPhone = `+91${rawPhone}`;
-      const { error: phoneOtpError } = await supabase.auth.signInWithOtp({
-        phone: fullPhone,
-        options: { channel: 'sms' },
-      });
-
-      setBusy(false);
-
-      if (phoneOtpError) {
-        if (
-          phoneOtpError.message.toLowerCase().includes('unsupported phone provider') ||
-          phoneOtpError.message.toLowerCase().includes('phone_provider_disabled')
-        ) {
-          setError(
-            'మొబైల్ SMS గేట్‌వే ప్రస్తుతం కాన్ఫిగర్ కాలేదు. ఓటీపీ వెంటనే అందుకోవడానికి కింద మీ ఈమెయిల్ రాయండి లేదా పాస్‌వర్డ్‌తో లాగిన్ అవ్వండి.'
-          );
-          return;
-        }
-        setError(phoneOtpError.message);
-        return;
-      }
-
+      if (result.error) throw result.error;
       setOtpSent(true);
       setTimer(60);
-      setMessage(`+91 ${rawPhone} కు SMS ఓటీపీ పంపించబడింది.`);
-    } catch (err: unknown) {
+      setMessage(`A 6-digit verification code was sent to ${otpChannel === 'email' ? cleanEmail : `+91 ${mobile}`}.`);
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : 'Could not send the verification code. Try again.');
+    } finally {
       setBusy(false);
-      const msg = err instanceof Error ? err.message : 'ఓటీపీ పంపడం సాధ్యం కాలేదు.';
-      setError(msg);
     }
   };
 
-  // -------------------------------------------------------------
-  // 2. VERIFY OTP
-  // -------------------------------------------------------------
-  const handleVerifyOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setMessage(null);
-
-    const cleanCode = otp.trim();
-    if (cleanCode.length < 6) {
-      setError('దయచేసి 6 అంకెల ఓటీపీ కోడ్ నమోదు చేయండి (Enter 6-digit OTP code).');
+  const handleVerifyOtp = async (event: React.FormEvent) => {
+    event.preventDefault();
+    clearFeedback();
+    if (!/^\d{6}$/.test(otp)) {
+      setError('Enter the 6-digit code from your message.');
       return;
     }
 
-    const cleanEmail = email.trim().toLowerCase();
-    const rawPhone = cleanPhone(phone);
     setBusy(true);
-
     try {
-      let verifyResult;
+      const cleanEmail = email.trim().toLowerCase();
+      const mobile = cleanPhone(phone);
+      const result = otpChannel === 'email'
+        ? await supabase.auth.verifyOtp({ email: cleanEmail, token: otp, type: 'email' })
+        : await supabase.auth.verifyOtp({ phone: `+91${mobile}`, token: otp, type: 'sms' });
 
-      if (cleanEmail && cleanEmail.includes('@')) {
-        verifyResult = await supabase.auth.verifyOtp({
-          email: cleanEmail,
-          token: cleanCode,
-          type: 'email',
-        });
-      } else {
-        verifyResult = await supabase.auth.verifyOtp({
-          phone: `+91${rawPhone}`,
-          token: cleanCode,
-          type: 'sms',
-        });
-      }
-
-      setBusy(false);
-
-      if (verifyResult.error) {
-        setError(verifyResult.error.message || 'సరైన ఓటీపీ కోడ్ కాదు లేదా గడువు ముగిసింది.');
-        return;
-      }
-
-      const user = verifyResult.data?.user;
-      if (user) {
-        let actualRole: UserRole = selectedRole;
-        let isPendingAdmin = false;
-
-        if (selectedRole === 'admin') {
-          actualRole = 'citizen';
-          isPendingAdmin = true;
-          registerAdminApprovalRequest({
-            user_id: user.id,
-            display_name: name.trim() || user.user_metadata?.display_name || 'Admin Applicant',
-            phone: rawPhone || user.user_metadata?.phone || '',
-            email: cleanEmail || user.email || '',
-          });
-        }
-
-        // Cache profile locally
-        localStorage.setItem(
-          `palle_profile_${user.id}`,
-          JSON.stringify({
-            id: user.id,
-            display_name: name.trim() || user.user_metadata?.display_name || '',
-            phone: rawPhone || user.user_metadata?.phone || '',
-            email: cleanEmail || user.email || '',
-            role: actualRole,
-            pending_admin_approval: isPendingAdmin,
-          })
-        );
-
-        // Update database profile
-        supabase
+      if (result.error) throw result.error;
+      const user = result.data.user;
+      if (user && (name.trim() || authMode === 'signup' || otpChannel === 'phone')) {
+        const profileUpdates = {
+          ...(name.trim() ? { display_name: name.trim() } : {}),
+          ...((authMode === 'signup' || otpChannel === 'phone') && mobile.length === 10 ? { phone: mobile } : {}),
+        };
+        const { error: profileError } = await supabase
           .from('profiles')
-          .update({
-            display_name: name.trim() || undefined,
-            role: actualRole,
-          })
-          .eq('id', user.id)
-          .then(() => {});
+          .update(profileUpdates)
+          .eq('id', user.id);
+        if (profileError) console.warn('The account is signed in, but profile details could not be synced.', profileError.message);
       }
-
       onAuthenticated();
-    } catch (err: unknown) {
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : 'The code is invalid or has expired. Request a new code.');
+    } finally {
       setBusy(false);
-      const msg = err instanceof Error ? err.message : 'ఓటీపీ వెరిఫికేషన్ విఫలమైంది.';
-      setError(msg);
     }
   };
 
-  // -------------------------------------------------------------
-  // 3. SECONDARY PASSWORD LOGIN & SIGNUP
-  // -------------------------------------------------------------
-  const handlePasswordSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setMessage(null);
-
+  const handlePasswordSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    clearFeedback();
     const cleanEmail = email.trim().toLowerCase();
-    if (!cleanEmail || !cleanEmail.includes('@')) {
-      setError('సరైన ఈమెయిల్ అడ్రస్ రాయండి (Enter valid email).');
+    const mobile = cleanPhone(phone);
+    if (!/^\S+@\S+\.\S+$/.test(cleanEmail)) {
+      setError('Enter a valid email address.');
       return;
     }
-
     if (password.length < 8) {
-      setError('పాస్‌వర్డ్ కనీసం 8 అక్షరాలు ఉండాలి (Password must be 8+ chars).');
+      setError('Use a password with at least 8 characters.');
+      return;
+    }
+    if (authMode === 'signup' && (!name.trim() || mobile.length !== 10)) {
+      setError('Enter your full name and a valid 10-digit mobile number.');
       return;
     }
 
     setBusy(true);
-
-    if (authMode === 'signup') {
-      const rawPhone = cleanPhone(phone);
-      if (rawPhone.length !== 10) {
-        setError('దయచేసి 10 అంకెల మొబైల్ నంబర్ రాయండి (Enter 10-digit mobile).');
-        setBusy(false);
-        return;
-      }
-      if (!name.trim()) {
-        setError('మీ పూర్తి పేరు అవసరం (Full name is required).');
-        setBusy(false);
-        return;
-      }
-
-      const { data, error: signUpErr } = await supabase.auth.signUp({
-        email: cleanEmail,
-        password,
-        options: {
-          data: {
-            display_name: name.trim(),
-            phone: rawPhone,
-            requested_role: selectedRole,
-          },
-        },
-      });
-
-      setBusy(false);
-
-      if (signUpErr) {
-        setError(signUpErr.message);
-        return;
-      }
-
-      const user = data.user;
-      if (user) {
-        let actualRole: UserRole = selectedRole;
-        let isPendingAdmin = false;
-
-        if (selectedRole === 'admin') {
-          actualRole = 'citizen';
-          isPendingAdmin = true;
-          registerAdminApprovalRequest({
-            user_id: user.id,
-            display_name: name.trim(),
-            phone: rawPhone,
-            email: cleanEmail,
-          });
+    try {
+      if (authMode === 'signup') {
+        const { data, error: signUpError } = await supabase.auth.signUp({
+          email: cleanEmail,
+          password,
+          options: { data: { display_name: name.trim(), phone: mobile } },
+        });
+        if (signUpError) throw signUpError;
+        if (data.session) {
+          onAuthenticated();
+        } else {
+          setAuthMode('signin');
+          setLoginMethod('otp');
+          setMessage('Your account is created. Check your email to confirm it, then sign in.');
         }
-
-        localStorage.setItem(
-          `palle_profile_${user.id}`,
-          JSON.stringify({
-            id: user.id,
-            display_name: name.trim(),
-            phone: rawPhone,
-            email: cleanEmail,
-            role: actualRole,
-            pending_admin_approval: isPendingAdmin,
-          })
-        );
+        return;
       }
 
-      if (data.session) {
-        onAuthenticated();
-      } else {
-        setMessage('రిజిస్ట్రేషన్ పూర్తయింది! ఇప్పుడు మీ పాస్‌వర్డ్‌తో లాగిన్ అవ్వండి.');
-        setAuthMode('signin');
-      }
-      return;
+      const { error: signInError } = await supabase.auth.signInWithPassword({ email: cleanEmail, password });
+      if (signInError) throw signInError;
+      onAuthenticated();
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : 'Could not sign in. Check your details and try again.');
+    } finally {
+      setBusy(false);
     }
-
-    // Sign in with password
-    const { error: signInErr } = await supabase.auth.signInWithPassword({
-      email: cleanEmail,
-      password,
-    });
-
-    setBusy(false);
-
-    if (signInErr) {
-      setError(signInErr.message || 'ఈమెయిల్ లేదా పాస్‌వర్డ్ సరైనది కాదు.');
-      return;
-    }
-
-    onAuthenticated();
   };
 
-  // -------------------------------------------------------------
-  // 4. FORGOT PASSWORD WORKFLOW
-  // -------------------------------------------------------------
-  const handleSendRecoveryCode = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setMessage(null);
-
+  const handleSendRecoveryCode = async (event?: React.FormEvent) => {
+    event?.preventDefault();
+    clearFeedback();
     const cleanEmail = recoveryEmail.trim().toLowerCase();
-    if (!cleanEmail || !cleanEmail.includes('@')) {
-      setError('దయచేసి మీ రిజిస్టర్డ్ ఈమెయిల్ అడ్రస్ రాయండి.');
+    if (!/^\S+@\S+\.\S+$/.test(cleanEmail)) {
+      setError('Enter the email address on your account.');
       return;
     }
 
     setBusy(true);
-
     try {
-      const { error: resetErr } = await supabase.auth.signInWithOtp({
+      const { error: sendError } = await supabase.auth.signInWithOtp({
         email: cleanEmail,
+        options: { shouldCreateUser: false },
       });
-
-      setBusy(false);
-
-      if (resetErr) {
-        setError(resetErr.message || 'పాస్‌వర్డ్ రీసెట్ కోడ్ పంపడం సాధ్యం కాలేదు.');
-        return;
-      }
-
+      if (sendError) throw sendError;
       setRecoveryStep(2);
       setTimer(60);
-      setMessage(`6 అంకెల రీసెట్ కోడ్ మీ ఈమెయిల్ (${cleanEmail}) కు పంపించాము.`);
-    } catch (err: unknown) {
+      setMessage(`A password reset code was sent to ${cleanEmail}.`);
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : 'Could not send a reset code.');
+    } finally {
       setBusy(false);
-      const msg = err instanceof Error ? err.message : 'రీసెట్ కోడ్ పంపడం విఫలమైంది.';
-      setError(msg);
     }
   };
 
-  const handleResetPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setMessage(null);
-
-    const cleanCode = recoveryOtp.trim();
-    if (cleanCode.length < 6) {
-      setError('దయచేసి 6 అంకెల వెరిఫికేషన్ కోడ్ రాయండి.');
+  const handleResetPassword = async (event: React.FormEvent) => {
+    event.preventDefault();
+    clearFeedback();
+    if (!/^\d{6}$/.test(recoveryOtp)) {
+      setError('Enter the 6-digit reset code.');
       return;
     }
-
-    if (recoveryNewPassword.length < 8) {
-      setError('కొత్త పాస్‌వర్డ్ కనీసం 8 అక్షరాలు ఉండాలి.');
-      return;
-    }
-
-    if (recoveryNewPassword !== recoveryConfirmPassword) {
-      setError('రెండు పాస్‌వర్డ్‌లు సరిపోలడం లేదు. సరిగ్గా రాయండి.');
+    if (newPassword.length < 8 || newPassword !== confirmPassword) {
+      setError(newPassword.length < 8 ? 'Use a password with at least 8 characters.' : 'The passwords do not match.');
       return;
     }
 
     setBusy(true);
-
     try {
-      const { error: verifyErr } = await supabase.auth.verifyOtp({
+      const { error: verifyError } = await supabase.auth.verifyOtp({
         email: recoveryEmail.trim().toLowerCase(),
-        token: cleanCode,
+        token: recoveryOtp,
         type: 'email',
       });
-
-      if (verifyErr) {
-        setBusy(false);
-        setError(verifyErr.message || 'సరైన వెరిఫికేషన్ కోడ్ కాదు.');
-        return;
-      }
-
-      const { error: updateErr } = await supabase.auth.updateUser({
-        password: recoveryNewPassword,
-      });
-
+      if (verifyError) throw verifyError;
+      const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+      if (updateError) throw updateError;
+      onAuthenticated();
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : 'Could not reset the password. Request a new code.');
+    } finally {
       setBusy(false);
-
-      if (updateErr) {
-        setError(updateErr.message || 'పాస్‌వర్డ్ మార్చడం సాధ్యం కాలేదు.');
-        return;
-      }
-
-      setMessage('పాస్‌వర్డ్ విజయవంతంగా మార్చబడింది! లాగిన్ అవుతున్నారు…');
-      setTimeout(() => {
-        onAuthenticated();
-      }, 1000);
-    } catch (err: unknown) {
-      setBusy(false);
-      const msg = err instanceof Error ? err.message : 'పాస్‌వర్డ్ రీసెట్ విఫలమైంది.';
-      setError(msg);
     }
   };
 
-  // -------------------------------------------------------------
-  // 5. GOOGLE SIGN-IN PRE-CHECK
-  // -------------------------------------------------------------
   const handleGoogleSignIn = async () => {
+    clearFeedback();
+    setGoogleBusy(true);
     try {
-      setGoogleBusy(true);
-      setError(null);
-      setMessage(null);
-
-      const testUrl = `https://flovuwgbaafxjlwndifx.supabase.co/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(
-        window.location.origin
-      )}`;
-
-      const probePromise = fetch(testUrl, { redirect: 'manual' });
-      const timeoutPromise = new Promise<{ isTimeout: boolean }>((resolve) =>
-        setTimeout(() => resolve({ isTimeout: true }), 3500)
-      );
-
-      const probeResult = await Promise.race([probePromise, timeoutPromise]);
-
-      if ('isTimeout' in probeResult && probeResult.isTimeout) {
-        setError('గూగుల్ లాగిన్ రెస్పాన్స్ రాలేదు. దయచేసి మొబైల్ ఓటీపీతో లాగిన్ అవ్వండి.');
-        setGoogleBusy(false);
-        return;
-      }
-
-      const res = probeResult as Response;
-      if (res.status === 400) {
-        const text = await res.text();
-        if (text.includes('provider is not enabled') || text.includes('validation_failed')) {
-          setGoogleBusy(false);
-          setError(
-            'గూగుల్ లాగిన్ ఇంకా ఎనేబుల్ కాలేదు (Google Client ID అవసరం). దయచేసి పైన ఉన్న మొబైల్ ఓటీపీతో లాగిన్ అవ్వండి.'
-          );
-          return;
-        }
-      }
-
-      const { error: googleError } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: window.location.origin,
-        },
-      });
-
-      if (googleError) {
-        setError(googleError.message);
-        setGoogleBusy(false);
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Google sign-in failed.';
-      setError(msg);
+      await startGoogleSignIn();
+    } catch (authError) {
       setGoogleBusy(false);
+      setError(authError instanceof Error ? authError.message : 'Google sign-in could not be started.');
     }
   };
+
+  const isRecovery = authMode === 'recovery';
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-[#e8f7ec] via-white to-[#e8f1f8] px-4 py-6 sm:px-6 animate-fade-in">
-      <div className="mx-auto flex w-full max-w-[420px] flex-col">
-        {/* Village Branding Header */}
-        <div className="flex items-center gap-3">
-          <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-700 p-2 shadow-lg ring-2 ring-white animate-float">
-            <img src="/palle-nestham-logo.png" alt="Palle Nestham" className="h-full w-full object-contain" />
-          </div>
-          <div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-black uppercase tracking-[0.2em] text-emerald-800">
-                Palle Nestham
-              </span>
-              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
-                తండ్లం పంచాయతీ
-              </span>
+    <main className="auth-page min-h-screen">
+      <div className="mx-auto grid min-h-screen w-full max-w-[1440px] lg:grid-cols-[1.05fr_.95fr]">
+        <section className="auth-story relative hidden overflow-hidden px-12 py-12 text-white lg:flex lg:flex-col lg:justify-between xl:px-20">
+          <div className="absolute -right-28 top-20 h-80 w-80 rounded-full border border-white/10" />
+          <div className="absolute -bottom-32 -left-24 h-[28rem] w-[28rem] rounded-full border border-white/10" />
+          <div className="relative z-10 flex items-center gap-3">
+            <img src="/palle-nestham-logo.png" alt="" className="h-12 w-12 rounded-2xl bg-white p-1.5 object-contain shadow-lg" />
+            <div>
+              <p className="text-sm font-black tracking-[.14em]">PALLE NESTHAM</p>
+              <p className="mt-0.5 text-xs text-emerald-100/75">Thandlam · Tirupati district</p>
             </div>
-            <p className="text-xs font-semibold text-slate-600">మన ఊరు, మన బాధ్యత • తిరుపతి జిల్లా</p>
           </div>
-        </div>
 
-        {/* ------------------------------------------------------------- */}
-        {/* VIEW A: FORGOT PASSWORD RECOVERY SCREEN                       */}
-        {/* ------------------------------------------------------------- */}
-        {authMode === 'recovery' ? (
-          <section className="mt-5 rounded-3xl border border-emerald-100 bg-white/95 p-6 shadow-xl shadow-emerald-900/5 backdrop-blur-sm animate-slide-up">
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode('signin');
-                setError(null);
-                setMessage(null);
-                setRecoveryStep(1);
-              }}
-              className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 hover:underline mb-4"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              తిరిగి లాగిన్ స్క్రీన్‌కు (Back to Sign In)
-            </button>
+          <div className="relative z-10 max-w-xl py-14">
+            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3.5 py-2 text-xs font-semibold text-emerald-50 backdrop-blur">
+              <span className="h-2 w-2 rounded-full bg-lime-300 shadow-[0_0_0_5px_rgba(190,242,100,.12)]" />
+              A clearer way to care for our village
+            </div>
+            <h1 className="text-5xl font-semibold leading-[1.08] tracking-tight xl:text-6xl">
+              Your village.<br />
+              <span className="text-emerald-200">Your voice.</span>
+            </h1>
+            <p className="mt-6 max-w-lg text-base leading-7 text-emerald-50/75">
+              Report local issues, follow every update, and help your Panchayat turn community concerns into visible action.
+            </p>
 
-            <div className="flex items-center gap-3 mb-4">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-800 shadow-xs">
-                <KeyRound className="h-5 w-5" />
+            <div className="mt-10 grid max-w-lg grid-cols-3 gap-3">
+              {[
+                ['01', 'Report', 'Share a local issue'],
+                ['02', 'Track', 'Follow its progress'],
+                ['03', 'Resolve', 'See the outcome'],
+              ].map(([step, title, caption]) => (
+                <div key={step} className="rounded-2xl border border-white/10 bg-white/[.06] p-4 backdrop-blur-sm">
+                  <span className="text-[10px] font-bold tracking-[.18em] text-lime-200">{step}</span>
+                  <p className="mt-3 text-sm font-bold">{title}</p>
+                  <p className="mt-1 text-[11px] leading-4 text-emerald-50/60">{caption}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="relative z-10 flex items-center justify-between text-[11px] text-emerald-50/55">
+            <span>మన ఊరు · మన బాధ్యత</span>
+            <span className="inline-flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5" /> Secure resident access</span>
+          </div>
+        </section>
+
+        <section className="flex min-h-screen flex-col bg-[#f7f9f6] px-5 py-6 sm:px-8 lg:bg-white lg:px-12 xl:px-20">
+          <header className="mx-auto flex w-full max-w-[500px] items-center gap-3 lg:hidden">
+            <img src="/palle-nestham-logo.png" alt="Palle Nestham" className="h-11 w-11 rounded-2xl bg-white p-1.5 object-contain shadow-sm ring-1 ring-slate-200" />
+            <div>
+              <p className="text-xs font-black tracking-[.14em] text-emerald-950">PALLE NESTHAM</p>
+              <p className="mt-0.5 text-[11px] font-medium text-slate-500">Thandlam · Tirupati district</p>
+            </div>
+          </header>
+
+          <div className="mx-auto flex w-full max-w-[500px] flex-1 flex-col justify-center py-8 lg:max-w-[460px] lg:py-14">
+            <div className="mb-6 lg:mb-8">
+              <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-800 lg:hidden">
+                <Sparkles className="h-5 w-5" />
               </div>
-              <div>
-                <h2 className="text-base font-extrabold text-slate-900">Forgot Password?</h2>
-                <p className="text-xs text-slate-500">
-                  {recoveryStep === 1
-                    ? 'మీ ఈమెయిల్‌కు 6 అంకెల రీసెట్ ఓటీపీ వస్తుంది.'
-                    : 'ఓటీపీ నమోదు చేసి కొత్త పాస్‌వర్డ్ సెట్ చేసుకోండి.'}
-                </p>
-              </div>
+              <p className="text-xs font-bold uppercase tracking-[.16em] text-emerald-800">Resident portal</p>
+              <h2 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950 sm:text-[2.1rem]">
+                {isRecovery ? 'Reset your password' : authMode === 'signup' ? 'Create your account' : 'Welcome back'}
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-slate-500">
+                {isRecovery
+                  ? 'We’ll send a one-time code to your registered email.'
+                  : authMode === 'signup'
+                    ? 'Join your community and keep up with local reports.'
+                    : 'Sign in to report an issue or follow its progress.'}
+              </p>
             </div>
 
-            {/* Error & Message Alerts */}
             {error && (
-              <div className="mb-4 flex items-start gap-2.5 rounded-2xl border border-rose-200 bg-rose-50/90 p-3 text-xs text-rose-800 animate-fade-in">
-                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
-                <span className="font-medium leading-relaxed">{error}</span>
+              <div role="alert" className="mb-4 flex items-start gap-2.5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 animate-fade-in">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{error}</span>
               </div>
             )}
             {message && (
-              <div className="mb-4 flex items-start gap-2.5 rounded-2xl border border-emerald-200 bg-emerald-50/90 p-3 text-xs text-emerald-900 animate-fade-in">
-                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                <span className="font-semibold leading-relaxed">{message}</span>
+              <div role="status" className="mb-4 flex items-start gap-2.5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 animate-fade-in">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{message}</span>
               </div>
             )}
 
-            {recoveryStep === 1 && (
-              <form onSubmit={handleSendRecoveryCode} className="space-y-4">
-                <div>
-                  <label className="mb-1 block text-xs font-bold text-slate-700">
-                    మీ రిజిస్టర్డ్ ఈమెయిల్ • Registered Email <span className="text-rose-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                    <input
-                      type="email"
-                      value={recoveryEmail}
-                      onChange={(e) => setRecoveryEmail(e.target.value)}
-                      placeholder="you@example.com"
-                      className="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pl-10 pr-3.5 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-                      required
-                      autoFocus
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={busy || !recoveryEmail.includes('@')}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 py-3.5 text-sm font-bold text-white shadow-lg shadow-emerald-700/20 transition-all hover:opacity-95 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                  {busy ? 'కోడ్ పంపుతున్నాము…' : 'రీసెట్ కోడ్ పంపండి • Send Code'}
+            {isRecovery ? (
+              <div className="auth-card rounded-3xl border border-slate-200/80 bg-white p-5 shadow-xl shadow-slate-900/[.04] sm:p-7">
+                <button type="button" onClick={() => { setAuthMode('signin'); setRecoveryStep(1); clearFeedback(); }} className="mb-6 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 transition hover:text-emerald-800">
+                  <ArrowLeft className="h-4 w-4" /> Back to sign in
                 </button>
-              </form>
-            )}
-
-            {recoveryStep === 2 && (
-              <form onSubmit={handleResetPassword} className="space-y-3.5">
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-bold text-slate-700">
-                      6 అంకెల కోడ్ • Reset Code <span className="text-rose-500">*</span>
-                    </label>
-                    <button
-                      type="button"
-                      disabled={timer > 0 || busy}
-                      onClick={handleSendRecoveryCode}
-                      className="text-[11px] font-bold text-emerald-700 disabled:opacity-40"
-                    >
-                      {timer > 0 ? `మళ్ళీ పంపండి (${timer}s)` : 'Resend Code'}
-                    </button>
-                  </div>
-                  <div className="relative">
-                    <KeyRound className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={6}
-                      value={recoveryOtp}
-                      onChange={(e) => setRecoveryOtp(e.target.value.replace(/\D/g, ''))}
-                      placeholder="• • • • • •"
-                      className="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pl-10 pr-3.5 text-center text-lg font-bold tracking-[0.3em] text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-                      autoFocus
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-bold text-slate-700">
-                    కొత్త పాస్‌వర్డ్ • New Password <span className="text-rose-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <LockKeyhole className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                    <input
-                      type={showRecoveryPassword ? 'text' : 'password'}
-                      value={recoveryNewPassword}
-                      onChange={(e) => setRecoveryNewPassword(e.target.value)}
-                      placeholder="కనీసం 8 అక్షరాలు"
-                      className="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pl-10 pr-11 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-                      required
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowRecoveryPassword(!showRecoveryPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400"
-                    >
-                      {showRecoveryPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-bold text-slate-700">
-                    మళ్ళీ కొత్త పాస్‌వర్డ్ • Confirm Password <span className="text-rose-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <LockKeyhole className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                    <input
-                      type={showRecoveryPassword ? 'text' : 'password'}
-                      value={recoveryConfirmPassword}
-                      onChange={(e) => setRecoveryConfirmPassword(e.target.value)}
-                      placeholder="మళ్ళీ పాస్‌వర్డ్ రాయండి"
-                      className="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pl-10 pr-3.5 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-                      required
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={busy || recoveryOtp.length < 6 || recoveryNewPassword.length < 8}
-                  className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 py-3.5 text-sm font-bold text-white shadow-lg shadow-emerald-700/20 transition-all hover:opacity-95 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                  {busy ? 'పాస్‌వర్డ్ మారుస్తున్నాము…' : 'పాస్‌వర్డ్ రీసెట్ చేసి లాగిన్ అవ్వండి'}
-                </button>
-              </form>
-            )}
-          </section>
-        ) : (
-          /* ------------------------------------------------------------- */
-          /* VIEW B: PRIMARY MOBILE OTP FIRST LOGIN INTERFACE              */
-          /* ------------------------------------------------------------- */
-          <div className="mt-5 space-y-4">
-            {/* 1. Mode Switch: Sign In vs New Registration */}
-            <div className="flex rounded-2xl bg-emerald-900/5 p-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode('signin');
-                  setOtpSent(false);
-                  setError(null);
-                  setMessage(null);
-                }}
-                className={`flex-1 rounded-xl py-2.5 text-xs font-extrabold transition-all duration-200 ${
-                  authMode === 'signin'
-                    ? 'bg-white text-emerald-900 shadow-md ring-1 ring-emerald-100 scale-[1.01]'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                లాగిన్ • Sign In
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode('signup');
-                  setOtpSent(false);
-                  setError(null);
-                  setMessage(null);
-                }}
-                className={`flex-1 rounded-xl py-2.5 text-xs font-extrabold transition-all duration-200 ${
-                  authMode === 'signup'
-                    ? 'bg-white text-emerald-900 shadow-md ring-1 ring-emerald-100 scale-[1.01]'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                కొత్త రిజిస్ట్రేషన్ • Sign Up
-              </button>
-            </div>
-
-            {/* Error Alert */}
-            {error && (
-              <div className="flex items-start gap-2.5 rounded-2xl border border-rose-200 bg-rose-50/90 p-3.5 text-xs text-rose-800 animate-fade-in shadow-2xs">
-                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
-                <span className="font-semibold leading-relaxed">{error}</span>
-              </div>
-            )}
-
-            {/* Success Alert */}
-            {message && (
-              <div className="flex items-start gap-2.5 rounded-2xl border border-emerald-200 bg-emerald-50/90 p-3.5 text-xs text-emerald-900 animate-fade-in shadow-2xs">
-                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                <span className="font-semibold leading-relaxed">{message}</span>
-              </div>
-            )}
-
-            {/* ----------------------------------------------------------- */}
-            {/* PRIMARY CARD: MOBILE NUMBER & OTP LOGIN (FRONT & CENTER)    */}
-            {/* ----------------------------------------------------------- */}
-            <section className="rounded-3xl border-2 border-emerald-500/80 bg-white p-5 shadow-xl shadow-emerald-900/10 backdrop-blur-sm animate-slide-up relative overflow-hidden">
-              {/* Highlight Badge */}
-              <div className="mb-3.5 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-100 text-emerald-800">
-                    <Phone className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <h2 className="text-sm font-black text-slate-900">
-                      {authMode === 'signup' ? 'మొబైల్ ఓటీపీ రిజిస్ట్రేషన్' : 'మొబైల్ నంబర్ ఓటీపీ లాగిన్'}
-                    </h2>
-                    <span className="text-[10px] text-emerald-700 font-bold">
-                      {authMode === 'signup' ? 'New Citizen Registration' : 'Fast & Secure Mobile Login'}
-                    </span>
-                  </div>
-                </div>
-                <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-emerald-800 border border-emerald-200">
-                  Primary
-                </span>
-              </div>
-
-              {!otpSent ? (
-                <form onSubmit={handleSendOtp} className="space-y-3.5">
-                  {/* If Sign Up: Ask Name & Role */}
-                  {authMode === 'signup' && (
-                    <>
-                      <div>
-                        <label className="mb-1 block text-xs font-bold text-slate-800">
-                          మీ పూర్తి పేరు • Full Name <span className="text-rose-500">*</span>
-                        </label>
-                        <div className="relative">
-                          <UserRound className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                          <input
-                            type="text"
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            placeholder="ఉదా: రాముడు"
-                            className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 py-2.5 pl-10 pr-3.5 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-4 focus:ring-emerald-100"
-                            required
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="mb-1.5 block text-xs font-bold text-slate-800">
-                          మీ హోదా • Account Role <span className="text-rose-500">*</span>
-                        </label>
-                        <div className="grid grid-cols-3 gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedRole('citizen')}
-                            className={`flex flex-col items-center gap-1 rounded-xl border p-2 text-center transition-all active:scale-95 ${
-                              selectedRole === 'citizen'
-                                ? 'border-emerald-600 bg-emerald-50 text-emerald-900 font-black ring-1 ring-emerald-400'
-                                : 'border-slate-200 bg-white text-slate-600'
-                            }`}
-                          >
-                            <UserRound className="h-3.5 w-3.5" />
-                            <span className="text-[10px]">గ్రామస్థులు</span>
-                            <span className="text-[8px] text-slate-500">Citizen</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => setSelectedRole('official')}
-                            className={`flex flex-col items-center gap-1 rounded-xl border p-2 text-center transition-all active:scale-95 ${
-                              selectedRole === 'official'
-                                ? 'border-indigo-600 bg-indigo-50 text-indigo-900 font-black ring-1 ring-indigo-400'
-                                : 'border-slate-200 bg-white text-slate-600'
-                            }`}
-                          >
-                            <Building2 className="h-3.5 w-3.5" />
-                            <span className="text-[10px]">సిబ్బంది</span>
-                            <span className="text-[8px] text-slate-500">Official</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => setSelectedRole('admin')}
-                            className={`flex flex-col items-center gap-1 rounded-xl border p-2 text-center transition-all active:scale-95 ${
-                              selectedRole === 'admin'
-                                ? 'border-amber-600 bg-amber-50 text-amber-900 font-black ring-1 ring-amber-400'
-                                : 'border-slate-200 bg-white text-slate-600'
-                            }`}
-                          >
-                            <Crown className="h-3.5 w-3.5" />
-                            <span className="text-[10px]">అడ్మిన్</span>
-                            <span className="text-[8px] text-slate-500">Admin</span>
-                          </button>
-                        </div>
-                      </div>
-                    </>
-                  )}
-
-                  {/* Primary Mobile Number Field */}
-                  <div>
-                    <label className="mb-1 block text-xs font-bold text-slate-800">
-                      మొబైల్ నంబర్ • Mobile Number <span className="text-rose-500">*</span>
-                    </label>
-                    <div className="flex gap-2">
-                      <span className="flex items-center justify-center rounded-2xl border border-slate-200 bg-slate-100 px-3.5 text-xs font-bold text-slate-800">
-                        🇮🇳 +91
-                      </span>
-                      <div className="relative flex-1">
-                        <Phone className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                        <input
-                          type="tel"
-                          value={phone}
-                          maxLength={10}
-                          onChange={(e) => setPhone(cleanPhone(e.target.value))}
-                          placeholder="10 అంకెల మొబైల్ నంబర్"
-                          className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 py-3 pl-10 pr-3.5 text-sm font-bold tracking-wider text-slate-900 outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-4 focus:ring-emerald-100"
-                          required
-                          autoFocus
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Email Input for Instant OTP Delivery */}
-                  <div>
-                    <label className="mb-1 block text-xs font-bold text-slate-800">
-                      {authMode === 'signup' ? (
-                        <>
-                          ఈమెయిల్ • Email for Instant OTP <span className="text-rose-500">*</span>
-                        </>
-                      ) : (
-                        <>
-                          ఓటీపీ ఈమెయిల్ • Email Address <span className="text-slate-400 font-normal">(తక్షణ ఓటీపీ కోసం)</span>
-                        </>
-                      )}
-                    </label>
+                {recoveryStep === 1 ? (
+                  <form onSubmit={handleSendRecoveryCode} className="space-y-4">
+                    <label htmlFor="recovery-email" className="field-label">Registered email</label>
                     <div className="relative">
-                      <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <input
-                        type="email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        placeholder="you@example.com (ఓటీపీ తక్షణమే అందుకోవడానికి)"
-                        className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 py-2.5 pl-10 pr-3.5 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-4 focus:ring-emerald-100"
-                        required={authMode === 'signup'}
-                      />
+                      <Mail className="field-icon" />
+                      <input id="recovery-email" type="email" autoComplete="email" value={recoveryEmail} onChange={(event) => setRecoveryEmail(event.target.value)} placeholder="you@example.com" className="auth-input" required />
                     </div>
-                    <p className="mt-1 text-[10px] text-slate-500">
-                      ⚡ 6 అంకెల ఓటీపీ కోడ్ ఇన్బాక్స్‌కు రియల్‌టైమ్‌లో చేరుతుంది.
-                    </p>
-                  </div>
-
-                  {/* Big Glowing Send OTP Button */}
-                  <button
-                    type="submit"
-                    disabled={busy || phone.length !== 10}
-                    className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 py-3.5 text-sm font-black text-white shadow-lg shadow-emerald-700/25 transition-all duration-200 hover:opacity-95 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 animate-pulse-glow"
-                  >
-                    {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <ShieldCheck className="h-5 w-5" />}
-                    {busy ? 'ఓటీపీ పంపుతున్నాము…' : '🚀 ఓటీపీ పంపండి • Send OTP Code'}
-                  </button>
-                </form>
-              ) : (
-                /* Enter 6-digit OTP */
-                <form onSubmit={handleVerifyOtp} className="space-y-4">
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-bold text-slate-800">
-                        6 అంకెల ఓటీపీ నమోదు చేయండి • Enter OTP <span className="text-rose-500">*</span>
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setOtpSent(false);
-                          setError(null);
-                        }}
-                        className="text-[11px] font-bold text-emerald-700 hover:underline"
-                      >
-                        నంబర్ మార్చండి
+                    <button type="submit" disabled={busy} className="primary-auth-button">
+                      {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                      Send reset code
+                    </button>
+                  </form>
+                ) : (
+                  <form onSubmit={handleResetPassword} className="space-y-4">
+                    <div>
+                      <label htmlFor="recovery-code" className="field-label">6-digit reset code</label>
+                      <input id="recovery-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={recoveryOtp} onChange={(event) => setRecoveryOtp(event.target.value.replace(/\D/g, ''))} placeholder="000000" className="auth-input mt-2 text-center text-lg font-bold tracking-[.35em]" required />
+                      <button type="button" disabled={timer > 0 || busy} onClick={() => void handleSendRecoveryCode()} className="mt-2 text-xs font-semibold text-emerald-800 disabled:text-slate-400">
+                        {timer > 0 ? `Resend in ${timer}s` : 'Send another code'}
                       </button>
                     </div>
-
-                    <div className="relative mt-2">
-                      <KeyRound className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        maxLength={6}
-                        value={otp}
-                        onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
-                        placeholder="• • • • • •"
-                        className="w-full rounded-2xl border-2 border-emerald-400 bg-white py-3 pl-10 pr-3.5 text-center text-xl font-black tracking-[0.4em] text-slate-900 outline-none transition focus:border-emerald-600 focus:ring-4 focus:ring-emerald-100"
-                        autoFocus
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500">
-                      {timer > 0 ? `మళ్ళీ కోడ్ పంపడానికి: ${timer}s` : 'కోడ్ రాలేదా?'}
-                    </span>
-                    <button
-                      type="button"
-                      disabled={timer > 0 || busy}
-                      onClick={() => handleSendOtp()}
-                      className="font-extrabold text-emerald-800 disabled:opacity-40"
-                    >
-                      Resend OTP (మళ్ళీ పంపండి)
-                    </button>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={busy || otp.length < 6}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 py-3.5 text-sm font-black text-white shadow-lg shadow-emerald-700/25 transition-all duration-200 hover:opacity-95 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <ArrowRight className="h-5 w-5" />}
-                    {busy
-                      ? 'ధృవీకరిస్తున్నాము…'
-                      : authMode === 'signup'
-                      ? '✓ రిజిస్ట్రేషన్ పూర్తి చేయండి (Create Account)'
-                      : '✓ లాగిన్ అవ్వండి (Verify & Sign In)'}
-                  </button>
-                </form>
-              )}
-            </section>
-
-            {/* ----------------------------------------------------------- */}
-            {/* SECONDARY OPTIONS (AT THE BOTTOM OF THE SCREEN)             */}
-            {/* ----------------------------------------------------------- */}
-            <div className="pt-2">
-              <div className="relative my-3">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-slate-200" />
-                </div>
-                <div className="relative flex justify-center text-[11px]">
-                  <span className="bg-[#f2faf4] px-3 font-bold text-slate-500">
-                    ఇతర లాగిన్ విధానాలు • Other Options
-                  </span>
-                </div>
-              </div>
-
-              {/* 1. Expandable Email & Password Card */}
-              <div className="rounded-2xl border border-slate-200/90 bg-white/95 shadow-sm transition-all overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setShowPasswordSection(!showPasswordSection)}
-                  className="flex w-full items-center justify-between p-3.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50"
-                >
-                  <div className="flex items-center gap-2">
-                    <LockKeyhole className="h-4 w-4 text-slate-500" />
-                    <span>ఈమెయిల్ & పాస్‌వర్డ్ ద్వారా లాగిన్ (Email & Password)</span>
-                  </div>
-                  {showPasswordSection ? (
-                    <ChevronUp className="h-4 w-4 text-slate-400" />
-                  ) : (
-                    <ChevronDown className="h-4 w-4 text-slate-400" />
-                  )}
-                </button>
-
-                {showPasswordSection && (
-                  <form onSubmit={handlePasswordSubmit} className="space-y-3 border-t border-slate-100 p-4">
                     <div>
-                      <label className="mb-1 block text-xs font-bold text-slate-700">
-                        ఈమెయిల్ అడ్రస్ • Email Address <span className="text-rose-500">*</span>
-                      </label>
-                      <div className="relative">
-                        <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                        <input
-                          type="email"
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          placeholder="you@example.com"
-                          className="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pl-10 pr-3.5 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-                          required
-                        />
+                      <label htmlFor="new-password" className="field-label">New password</label>
+                      <div className="relative mt-2">
+                        <LockKeyhole className="field-icon" />
+                        <input id="new-password" type={showNewPassword ? 'text' : 'password'} autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="At least 8 characters" className="auth-input pr-12" required />
+                        <button type="button" aria-label={showNewPassword ? 'Hide password' : 'Show password'} onClick={() => setShowNewPassword((shown) => !shown)} className="field-trailing-button">{showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>
                       </div>
                     </div>
-
                     <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <label className="block text-xs font-bold text-slate-700">
-                          పాస్‌వర్డ్ • Password <span className="text-rose-500">*</span>
-                        </label>
-                        {authMode === 'signin' && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAuthMode('recovery');
-                              setRecoveryEmail(email);
-                              setError(null);
-                              setMessage(null);
-                            }}
-                            className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:underline"
-                          >
-                            <KeyRound className="h-3 w-3" />
-                            Forgot Password? (పాస్‌వర్డ్ మర్చిపోయారా?)
-                          </button>
-                        )}
-                      </div>
-                      <div className="relative">
-                        <LockKeyhole className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                        <input
-                          type={showPassword ? 'text' : 'password'}
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          placeholder="కనీసం 8 అక్షరాలు"
-                          className="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pl-10 pr-11 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-                          required
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400"
-                        >
-                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                        </button>
-                      </div>
+                      <label htmlFor="confirm-password" className="field-label">Confirm password</label>
+                      <input id="confirm-password" type={showNewPassword ? 'text' : 'password'} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Enter it again" className="auth-input mt-2" required />
                     </div>
-
-                    <button
-                      type="submit"
-                      disabled={busy}
-                      className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-800 py-3 text-xs font-bold text-white shadow-sm transition hover:bg-slate-900 active:scale-[0.98] disabled:opacity-50"
-                    >
+                    <button type="submit" disabled={busy} className="primary-auth-button">
                       {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                      {busy ? 'పరిశీలిస్తున్నాము…' : authMode === 'signup' ? 'పాస్‌వర్డ్‌తో రిజిస్టర్' : 'పాస్‌వర్డ్‌తో లాగిన్'}
+                      Save new password
                     </button>
                   </form>
                 )}
               </div>
+            ) : (
+              <>
+                <div className="mb-5 grid grid-cols-2 rounded-2xl bg-slate-100 p-1">
+                  <button type="button" onClick={() => switchMode('signin')} className={`rounded-xl px-3 py-2.5 text-sm font-semibold transition ${authMode === 'signin' ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>Sign in</button>
+                  <button type="button" onClick={() => switchMode('signup')} className={`rounded-xl px-3 py-2.5 text-sm font-semibold transition ${authMode === 'signup' ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>Create account</button>
+                </div>
 
-              {/* 2. Continue with Google Button */}
-              <div className="mt-2.5">
-                <button
-                  type="button"
-                  disabled={googleBusy}
-                  onClick={handleGoogleSignIn}
-                  className="inline-flex w-full items-center justify-center gap-2.5 rounded-2xl border border-slate-200 bg-white py-3 text-xs font-bold text-slate-700 shadow-xs transition hover:bg-slate-50 active:scale-[0.98] disabled:opacity-60"
-                >
-                  {googleBusy ? (
-                    <Loader2 className="h-4 w-4 animate-spin text-slate-500" />
-                  ) : (
-                    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24">
-                      <path
-                        fill="#4285F4"
-                        d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"
-                      />
-                      <path
-                        fill="#34A853"
-                        d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"
-                      />
-                      <path
-                        fill="#FBBC05"
-                        d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 10.03 0 12s.45 3.82 1.25 5.42l4.03-3.15z"
-                      />
-                      <path
-                        fill="#EA4335"
-                        d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
-                      />
-                    </svg>
+                <div className="auth-card rounded-3xl border border-slate-200/80 bg-white p-5 shadow-xl shadow-slate-900/[.04] sm:p-7">
+                  {authMode === 'signup' && (
+                    <div className="mb-4">
+                      <label htmlFor="full-name" className="field-label">Full name</label>
+                      <div className="relative mt-2">
+                        <UserRound className="field-icon" />
+                        <input id="full-name" autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Your name" className="auth-input" required />
+                      </div>
+                    </div>
                   )}
-                  {googleBusy ? 'కనెక్ట్ అవుతోంది…' : 'Continue with Google (గూగుల్‌తో లాగిన్)'}
-                </button>
-              </div>
 
-              {/* Village Helpline Footer */}
-              <div className="mt-4 text-center">
-                <p className="text-[11px] text-slate-500">
-                  సహాయం కావాలా? గ్రామ సచివాలయాన్ని లేదా టోల్ ఫ్రీ హెల్ప్‌లైన్‌ను సంప్రదించండి.
-                </p>
-              </div>
-            </div>
+                  <div className="mb-4 grid grid-cols-2 rounded-xl border border-slate-200 bg-slate-50 p-1">
+                    <button type="button" onClick={() => { setLoginMethod('otp'); setOtpSent(false); clearFeedback(); }} className={`rounded-lg py-2 text-xs font-semibold transition ${loginMethod === 'otp' ? 'bg-white text-emerald-900 shadow-sm' : 'text-slate-500'}`}>One-time code</button>
+                    <button type="button" onClick={() => { setLoginMethod('password'); setOtpSent(false); clearFeedback(); }} className={`rounded-lg py-2 text-xs font-semibold transition ${loginMethod === 'password' ? 'bg-white text-emerald-900 shadow-sm' : 'text-slate-500'}`}>Password</button>
+                  </div>
+
+                  {loginMethod === 'otp' ? (
+                    !otpSent ? (
+                      <form onSubmit={handleSendOtp} className="space-y-4">
+                        <div className="grid grid-cols-2 gap-2">
+                          <button type="button" onClick={() => { setOtpChannel('email'); clearFeedback(); }} className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-xs font-semibold transition ${otpChannel === 'email' ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}><Mail className="h-3.5 w-3.5" /> Email code</button>
+                          <button type="button" onClick={() => { setOtpChannel('phone'); clearFeedback(); }} className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-xs font-semibold transition ${otpChannel === 'phone' ? 'border-emerald-700 bg-emerald-50 text-emerald-900' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}><Phone className="h-3.5 w-3.5" /> SMS code</button>
+                        </div>
+                        {otpChannel === 'email' ? (
+                          <div>
+                            <label htmlFor="login-email" className="field-label">Email address</label>
+                            <div className="relative mt-2"><Mail className="field-icon" /><input id="login-email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" className="auth-input" required /></div>
+                          </div>
+                        ) : (
+                          <div>
+                            <label htmlFor="login-phone" className="field-label">Mobile number</label>
+                            <div className="relative mt-2"><Phone className="field-icon" /><span className="absolute left-10 top-1/2 -translate-y-1/2 text-sm font-medium text-slate-500">+91</span><input id="login-phone" type="tel" inputMode="numeric" autoComplete="tel-national" maxLength={10} value={phone} onChange={(event) => setPhone(cleanPhone(event.target.value))} placeholder="10-digit number" className="auth-input pl-[4.6rem]" required /></div>
+                            <p className="mt-2 text-xs leading-5 text-slate-500">SMS codes require an active phone provider in Supabase.</p>
+                          </div>
+                        )}
+                        {authMode === 'signup' && otpChannel === 'email' && (
+                          <div>
+                            <label htmlFor="signup-phone" className="field-label">Mobile number</label>
+                            <div className="relative mt-2"><Phone className="field-icon" /><span className="absolute left-10 top-1/2 -translate-y-1/2 text-sm font-medium text-slate-500">+91</span><input id="signup-phone" type="tel" inputMode="numeric" autoComplete="tel-national" maxLength={10} value={phone} onChange={(event) => setPhone(cleanPhone(event.target.value))} placeholder="10-digit number" className="auth-input pl-[4.6rem]" required /></div>
+                          </div>
+                        )}
+                        <button type="submit" disabled={busy} className="primary-auth-button">
+                          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+                          {busy ? 'Sending code…' : 'Send verification code'}
+                        </button>
+                      </form>
+                    ) : (
+                      <form onSubmit={handleVerifyOtp} className="space-y-4">
+                        <div>
+                          <label htmlFor="verification-code" className="field-label">6-digit verification code</label>
+                          <input id="verification-code" type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, ''))} placeholder="000000" className="auth-input mt-2 text-center text-xl font-bold tracking-[.4em]" required />
+                          <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
+                            <span>{otpChannel === 'email' ? email : `+91 ${cleanPhone(phone)}`}</span>
+                            <button type="button" disabled={timer > 0 || busy} onClick={() => void handleSendOtp()} className="font-semibold text-emerald-800 disabled:text-slate-400">{timer > 0 ? `Resend in ${timer}s` : 'Resend code'}</button>
+                          </div>
+                        </div>
+                        <button type="submit" disabled={busy || otp.length !== 6} className="primary-auth-button">
+                          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                          Verify and continue
+                        </button>
+                        <button type="button" onClick={() => { setOtpSent(false); setOtp(''); clearFeedback(); }} className="w-full text-xs font-semibold text-slate-500 hover:text-slate-800">Change destination</button>
+                      </form>
+                    )
+                  ) : (
+                    <form onSubmit={handlePasswordSubmit} className="space-y-4">
+                      <div>
+                        <label htmlFor="password-email" className="field-label">Email address</label>
+                        <div className="relative mt-2"><Mail className="field-icon" /><input id="password-email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" className="auth-input" required /></div>
+                      </div>
+                      {authMode === 'signup' && (
+                        <div>
+                          <label htmlFor="password-phone" className="field-label">Mobile number</label>
+                          <div className="relative mt-2"><Phone className="field-icon" /><span className="absolute left-10 top-1/2 -translate-y-1/2 text-sm font-medium text-slate-500">+91</span><input id="password-phone" type="tel" inputMode="numeric" autoComplete="tel-national" maxLength={10} value={phone} onChange={(event) => setPhone(cleanPhone(event.target.value))} placeholder="10-digit number" className="auth-input pl-[4.6rem]" required /></div>
+                        </div>
+                      )}
+                      <div>
+                        <div className="mb-2 flex items-center justify-between">
+                          <label htmlFor="account-password" className="field-label">Password</label>
+                          {authMode === 'signin' && <button type="button" onClick={() => { setAuthMode('recovery'); setRecoveryEmail(email); setRecoveryStep(1); clearFeedback(); }} className="text-xs font-semibold text-emerald-800 hover:text-emerald-950">Forgot password?</button>}
+                        </div>
+                        <div className="relative"><LockKeyhole className="field-icon" /><input id="account-password" type={showPassword ? 'text' : 'password'} autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 8 characters" className="auth-input pr-12" required /><button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword((shown) => !shown)} className="field-trailing-button">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div>
+                      </div>
+                      <button type="submit" disabled={busy} className="primary-auth-button">
+                        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+                        {authMode === 'signup' ? 'Create account' : 'Sign in'}
+                      </button>
+                    </form>
+                  )}
+
+                  <div className="my-5 flex items-center gap-3 text-[10px] font-semibold uppercase tracking-[.12em] text-slate-400">
+                    <span className="h-px flex-1 bg-slate-200" />
+                    or continue with
+                    <span className="h-px flex-1 bg-slate-200" />
+                  </div>
+                  <button type="button" onClick={() => void handleGoogleSignIn()} disabled={googleBusy} className="google-auth-button">
+                    {googleBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <GoogleMark />}
+                    Continue with Google
+                  </button>
+                </div>
+              </>
+            )}
+
+            <p className="mx-auto mt-6 max-w-sm text-center text-[11px] leading-5 text-slate-400">
+              By continuing, you agree to use this portal for genuine community reports. Your contact details are kept private.
+            </p>
           </div>
-        )}
+
+          <footer className="mx-auto w-full max-w-[500px] pt-2 text-center text-[10px] font-medium text-slate-400 lg:text-left">
+            Palle Nestham · Thandlam Gram Panchayat
+          </footer>
+        </section>
       </div>
     </main>
+  );
+}
+
+function GoogleMark() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4">
+      <path fill="#4285F4" d="M23.49 12.27c0-.78-.07-1.53-.2-2.25H12v4.26h6.44a5.5 5.5 0 0 1-2.39 3.6v2.77h3.87c2.26-2.08 3.57-5.15 3.57-8.38Z" />
+      <path fill="#34A853" d="M12 24c3.24 0 5.96-1.08 7.95-2.93l-3.87-2.77c-1.08.72-2.46 1.15-4.08 1.15-3.14 0-5.8-2.12-6.75-4.97H1.26v2.85A12 12 0 0 0 12 24Z" />
+      <path fill="#FBBC05" d="M5.25 14.48a7.2 7.2 0 0 1 0-4.96V6.67H1.26a12 12 0 0 0 0 10.66l3.99-2.85Z" />
+      <path fill="#EA4335" d="M12 4.77c1.76 0 3.34.6 4.58 1.79l3.43-3.43A11.47 11.47 0 0 0 12 0 12 12 0 0 0 1.26 6.67l3.99 2.85C6.2 6.89 8.86 4.77 12 4.77Z" />
+    </svg>
   );
 }

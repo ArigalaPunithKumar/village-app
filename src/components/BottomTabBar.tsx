@@ -9,7 +9,7 @@ interface BottomTabBarProps {
 
 export default function BottomTabBar({ active, onChange }: BottomTabBarProps) {
   return (
-    <nav className="fixed bottom-0 left-1/2 z-50 w-full max-w-[420px] -translate-x-1/2 border-t border-slate-200/80 bg-white/95 backdrop-blur-xl shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
+    <nav aria-label="Mobile navigation" className="fixed bottom-0 left-0 z-50 w-full border-t border-slate-200/80 bg-white/95 backdrop-blur-xl shadow-[0_-4px_20px_rgba(0,0,0,0.06)] md:hidden">
       {/* Floating Center Report Button with Pulsating Glow */}
       <div className="absolute bottom-[calc(100%-12px)] left-1/2 -translate-x-1/2 pointer-events-auto">
         <button

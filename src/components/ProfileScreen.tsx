@@ -3,7 +3,7 @@ import {
   User,
   Phone,
   Mail,
-  Shield,
+  ShieldCheck,
   KeyRound,
   CheckCircle2,
   AlertCircle,
@@ -11,32 +11,29 @@ import {
   Eye,
   EyeOff,
   LogOut,
-  Sparkles,
-  Building2,
   Crown,
   Save,
-  Check,
-  XCircle,
   UserCheck,
   Clock,
+  ArrowRight,
 } from 'lucide-react';
 import {
   supabase,
   fetchCurrentProfile,
   saveProfileDetails,
+  registerAdminApprovalRequest,
   getPendingAdminRequests,
   resolveAdminRequest,
   type UserProfile,
-  type UserRole,
   type AdminApprovalRequest,
 } from '@/lib/supabase';
 
 interface ProfileScreenProps {
   onSignOut: () => void;
-  onRoleChange: (newRole: UserRole) => void;
+  onOpenAdmin: () => void;
 }
 
-export default function ProfileScreen({ onSignOut, onRoleChange }: ProfileScreenProps) {
+export default function ProfileScreen({ onSignOut, onOpenAdmin }: ProfileScreenProps) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -61,32 +58,35 @@ export default function ProfileScreen({ onSignOut, onRoleChange }: ProfileScreen
   // Admin approval queue (only visible to admins)
   const [adminRequests, setAdminRequests] = useState<AdminApprovalRequest[]>([]);
   const [actionReqId, setActionReqId] = useState<string | null>(null);
+  const [adminActionError, setAdminActionError] = useState<string | null>(null);
+  const [requestingAdmin, setRequestingAdmin] = useState(false);
 
   useEffect(() => {
+    let active = true;
     async function loadData() {
       const p = await fetchCurrentProfile();
       if (p) {
+        if (!active) return;
         setProfile(p);
         setName(p.display_name || '');
         setPhone(p.phone || '');
 
-        // Fetch complaints submitted by this user
-        if (p.phone || p.display_name) {
-          const { count } = await supabase
+        const [{ count }, requests] = await Promise.all([
+          supabase
             .from('complaints')
-            .select('*', { count: 'exact', head: true })
-            .or(`reporter_phone.eq.${p.phone},reporter_name.eq.${p.display_name}`);
-          setComplaintCount(count ?? 0);
-        }
+            .select('id', { count: 'exact', head: true })
+            .eq('reporter_user_id', p.id),
+          p.role === 'admin' ? getPendingAdminRequests() : Promise.resolve([]),
+        ]);
+        if (!active) return;
+        setComplaintCount(count ?? 0);
 
-        // If admin, load pending admin requests
-        if (p.role === 'admin') {
-          setAdminRequests(getPendingAdminRequests());
-        }
+        setAdminRequests(requests);
       }
-      setLoading(false);
+      if (active) setLoading(false);
     }
-    loadData();
+    void loadData();
+    return () => { active = false; };
   }, []);
 
   const handleUpdateDetails = async (e: React.FormEvent) => {
@@ -152,20 +152,28 @@ export default function ProfileScreen({ onSignOut, onRoleChange }: ProfileScreen
     }
   };
 
-  // Only admins can switch interface preview modes
-  const handleRoleToggle = (targetRole: UserRole) => {
-    if (!profile || profile.role !== 'admin') return;
-    const updated = { ...profile, role: targetRole };
-    setProfile(updated);
-    localStorage.setItem(`palle_profile_${profile.id}`, JSON.stringify(updated));
-    onRoleChange(targetRole);
+  const handleRequestAdmin = async () => {
+    setRequestingAdmin(true);
+    setAdminActionError(null);
+    const result = await registerAdminApprovalRequest();
+    if (!result.success) {
+      setAdminActionError(result.error || 'Could not send the request.');
+    } else {
+      const updated = await fetchCurrentProfile();
+      if (updated) setProfile(updated);
+    }
+    setRequestingAdmin(false);
   };
 
-  // Admin approves/rejects an applicant
-  const handleResolveRequest = (userId: string, approve: boolean) => {
+  const handleResolveRequest = async (userId: string, approve: boolean) => {
     setActionReqId(userId);
-    resolveAdminRequest(userId, approve);
-    setAdminRequests(getPendingAdminRequests());
+    setAdminActionError(null);
+    const result = await resolveAdminRequest(userId, approve);
+    if (!result.success) {
+      setAdminActionError(result.error || 'Could not update this request.');
+    } else {
+      setAdminRequests(await getPendingAdminRequests());
+    }
     setActionReqId(null);
   };
 
@@ -209,10 +217,10 @@ export default function ProfileScreen({ onSignOut, onRoleChange }: ProfileScreen
         </div>
 
         {/* Pending admin notification if user applied */}
-        {profile?.pending_admin_approval && (
+        {profile?.admin_access_status === 'pending' && (
           <div className="mt-3.5 flex items-center gap-2 rounded-2xl bg-amber-400/20 border border-amber-300/40 p-2.5 text-xs font-semibold text-amber-100 backdrop-blur-sm">
             <Clock className="h-4 w-4 shrink-0 text-amber-300" />
-            <span>Admin registration submitted. Awaiting approval from active administrator.</span>
+            <span>Your administrator access request is awaiting review.</span>
           </div>
         )}
 
@@ -228,50 +236,28 @@ export default function ProfileScreen({ onSignOut, onRoleChange }: ProfileScreen
         </div>
       </section>
 
-      {/* ADMIN ONLY: Interface Mode Switcher */}
+      {adminActionError && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{adminActionError}</div>}
+
+      {!isAdmin && profile?.admin_access_status !== 'pending' && (
+        <section className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Are you a village administrator?</h2>
+            <p className="mt-1 text-xs leading-5 text-slate-500">Send an access request. An existing administrator must review it.</p>
+          </div>
+          <button type="button" onClick={() => void handleRequestAdmin()} disabled={requestingAdmin} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60">
+            {requestingAdmin ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+            Request admin access
+          </button>
+        </section>
+      )}
+
       {isAdmin && (
-        <section className="rounded-3xl border border-amber-200 bg-amber-50/50 p-4 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Shield className="h-4 w-4 text-amber-700" />
-              <h2 className="text-xs font-bold text-amber-950">Admin Interface Control</h2>
-            </div>
-            <span className="rounded-full bg-amber-200 px-2 py-0.5 text-[9px] font-bold text-amber-950">
-              Admin Only
-            </span>
+        <section className="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50/60 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="rounded-xl bg-amber-100 p-2 text-amber-800"><ShieldCheck className="h-4 w-4" /></div>
+            <div><h2 className="text-sm font-semibold text-amber-950">Administrator workspace</h2><p className="mt-1 text-xs text-amber-950/65">Manage user access, village officials, and directory details.</p></div>
           </div>
-          <p className="mt-1 text-[11px] text-amber-900/80">
-            As an Administrator, you can preview the interface as Citizen, Official, or Admin. Normal users cannot change their role.
-          </p>
-
-          <div className="mt-3 grid grid-cols-3 gap-2">
-            <button
-              type="button"
-              onClick={() => handleRoleToggle('citizen')}
-              className="flex flex-col items-center gap-1 rounded-xl border border-slate-200 bg-white p-2 text-center text-slate-700 hover:bg-slate-50 transition"
-            >
-              <User className="h-3.5 w-3.5" />
-              <span className="text-[10px] font-bold">Citizen View</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleRoleToggle('official')}
-              className="flex flex-col items-center gap-1 rounded-xl border border-slate-200 bg-white p-2 text-center text-slate-700 hover:bg-slate-50 transition"
-            >
-              <Building2 className="h-3.5 w-3.5" />
-              <span className="text-[10px] font-bold">Official View</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleRoleToggle('admin')}
-              className="flex flex-col items-center gap-1 rounded-xl border border-amber-500 bg-amber-100 p-2 text-center text-amber-950 font-bold ring-1 ring-amber-400"
-            >
-              <Crown className="h-3.5 w-3.5" />
-              <span className="text-[10px]">Admin View</span>
-            </button>
-          </div>
+          <button type="button" onClick={onOpenAdmin} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-amber-900 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-amber-950"><span>Open workspace</span><ArrowRight className="h-3.5 w-3.5" /></button>
         </section>
       )}
 

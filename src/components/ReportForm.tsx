@@ -11,12 +11,8 @@ import {
   UploadCloud,
   X,
   ChevronLeft,
-  Navigation,
-  Sparkles,
-  RefreshCw,
   Copy,
   Check,
-  ShieldCheck,
   Info,
 } from 'lucide-react';
 import {
@@ -82,8 +78,8 @@ export default function ReportForm({ onSubmitted }: ReportFormProps) {
     async function loadUser() {
       const p = await fetchCurrentProfile();
       if (p) {
-        if (p.display_name && !reporterName) setReporterName(p.display_name);
-        if (p.phone && !reporterPhone) setReporterPhone(p.phone);
+        if (p.display_name) setReporterName((current) => current || p.display_name);
+        if (p.phone) setReporterPhone((current) => current || p.phone);
       }
     }
     loadUser();
@@ -124,16 +120,16 @@ export default function ReportForm({ onSubmitted }: ReportFormProps) {
             const village = addr.village || addr.town || addr.city || addr.county || 'తండ్లం (Thandlam)';
             const placeStr = [road, village].filter(Boolean).join(', ');
 
-            const resolvedLocation = placeStr || `తండ్లం పంచాయతీ (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`;
+            const resolvedLocation = placeStr || 'తండ్లం గ్రామ పంచాయతీ';
             setLocation(resolvedLocation);
             setGpsStatus(`📍 ${resolvedLocation}`);
           } else {
-            const coordsStr = `తండ్లం పంచాయతీ పరిధి (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`;
+            const coordsStr = 'తండ్లం గ్రామ పంచాయతీ';
             setLocation(coordsStr);
             setGpsStatus(`📍 ${coordsStr}`);
           }
         } catch {
-          const coordsStr = `తండ్లం పంచాయతీ పరిధి (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`;
+          const coordsStr = 'తండ్లం గ్రామ పంచాయతీ';
           setLocation(coordsStr);
           setGpsStatus(`📍 ${coordsStr}`);
         } finally {
@@ -239,6 +235,19 @@ export default function ReportForm({ onSubmitted }: ReportFormProps) {
     setSubmitting(true);
 
     try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData.user) throw new Error('Sign in again before submitting a report.');
+
+      let imagePath: string | null = null;
+      if (imageDataUrl) {
+        const imageBlob = await fetch(imageDataUrl).then((response) => response.blob());
+        imagePath = `${authData.user.id}/${crypto.randomUUID()}.jpg`;
+        const { error: uploadError } = await supabase.storage
+          .from('complaint-evidence')
+          .upload(imagePath, imageBlob, { contentType: 'image/jpeg', cacheControl: '3600' });
+        if (uploadError) throw uploadError;
+      }
+
       const { data, error: insertError } = await supabase
         .from('complaints')
         .insert({
@@ -249,22 +258,22 @@ export default function ReportForm({ onSubmitted }: ReportFormProps) {
           location: location.trim() || 'తండ్లం గ్రామ పంచాయతీ',
           reporter_name: reporterName.trim(),
           reporter_phone: cleanPhone,
-          image_url: imageDataUrl || null,
+          image_url: imagePath,
         })
         .select('ticket_number')
         .single();
 
-      setSubmitting(false);
-
       if (insertError || !data) {
+        if (imagePath) await supabase.storage.from('complaint-evidence').remove([imagePath]);
         setError(insertError?.message || 'సమస్యను పంపడంలో సమస్య ఏర్పడింది. మళ్ళీ ప్రయత్నించండి.');
         return;
       }
 
       onSubmitted(data.ticket_number);
-    } catch {
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'ఇంటర్నెట్ కనెక్షన్ సరిగ్గా ఉందో లేదో చూడండి.');
+    } finally {
       setSubmitting(false);
-      setError('ఇంటర్నెట్ కనెక్షన్ సరిగ్గా ఉందో లేదో చూడండి.');
     }
   };
 
