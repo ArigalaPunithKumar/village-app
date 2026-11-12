@@ -1,10 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   ArrowRight,
-  ArrowLeft,
   KeyRound,
   Loader2,
-  LockKeyhole,
   Phone,
   ShieldCheck,
   UserRound,
@@ -19,12 +17,25 @@ import {
   registerAdminApprovalRequest,
   type UserRole,
 } from '@/lib/supabase';
+import {
+  firebaseAuth,
+  RecaptchaVerifier,
+  signInWithPhoneNumber,
+  type ConfirmationResult,
+} from '@/lib/firebase';
 
 interface AuthScreenProps {
   onAuthenticated: () => void;
 }
 
 type AuthMode = 'signin' | 'signup';
+
+declare global {
+  interface Window {
+    recaptchaVerifier?: RecaptchaVerifier;
+    confirmationResult?: ConfirmationResult;
+  }
+}
 
 export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
   const [authMode, setAuthMode] = useState<AuthMode>('signin');
@@ -42,6 +53,9 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [timer, setTimer] = useState<number>(0);
+  const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
+
+  const recaptchaContainerRef = useRef<HTMLDivElement>(null);
 
   // Reset loading whenever window gains focus or visibility (e.g. user taps Android Back button)
   useEffect(() => {
@@ -68,8 +82,23 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
 
   const cleanPhone = (val: string) => val.replace(/\D/g, '').slice(0, 10);
 
+  // Initialize invisible reCAPTCHA for Firebase Phone Auth
+  const setupRecaptcha = () => {
+    if (!window.recaptchaVerifier) {
+      window.recaptchaVerifier = new RecaptchaVerifier(firebaseAuth, 'recaptcha-container', {
+        size: 'invisible',
+        callback: () => {
+          // reCAPTCHA solved
+        },
+        'expired-callback': () => {
+          setError('reCAPTCHA గడువు ముగిసింది. దయచేసి మళ్ళీ ప్రయత్నించండి.');
+        },
+      });
+    }
+  };
+
   // -------------------------------------------------------------
-  // 1. SEND REAL SMS OTP VIA SUPABASE
+  // 1. SEND REAL SMS OTP VIA FIREBASE (FREE 10,000 SMS / MONTH)
   // -------------------------------------------------------------
   const handleSendOtp = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -98,48 +127,46 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
     setBusy(true);
 
     try {
-      const fullPhone = `+91${rawPhone}`;
-      const { error: phoneOtpError } = await supabase.auth.signInWithOtp({
-        phone: fullPhone,
-        options: {
-          channel: 'sms',
-          data: {
-            display_name: name.trim() || undefined,
-            phone: rawPhone,
-            requested_role: selectedRole,
-          },
-        },
-      });
-
-      setBusy(false);
-
-      if (phoneOtpError) {
-        if (
-          phoneOtpError.message.toLowerCase().includes('unsupported phone provider') ||
-          phoneOtpError.message.toLowerCase().includes('phone_provider_disabled') ||
-          (phoneOtpError as any).status === 400
-        ) {
-          setError(
-            'మీ Supabase ప్రాజెక్ట్‌లో SMS ప్రొవైడర్ (Twilio / MessageBird) ఇంకా కాన్ఫిగర్ చేయలేదు. కింద ఉన్న "త్వరిత పౌర ప్రవేశం" ద్వారా వెంటనే లాగిన్ అవ్వవచ్చు.'
-          );
-          return;
-        }
-        setError(phoneOtpError.message);
-        return;
+      setupRecaptcha();
+      const appVerifier = window.recaptchaVerifier;
+      if (!appVerifier) {
+        throw new Error('reCAPTCHA వెరిఫైయర్ ప్రారంభం కాలేదు.');
       }
 
+      const formattedPhone = `+91${rawPhone}`;
+      const confirmation = await signInWithPhoneNumber(firebaseAuth, formattedPhone, appVerifier);
+      
+      window.confirmationResult = confirmation;
+      setConfirmationResult(confirmation);
+      setBusy(false);
       setOtpSent(true);
       setTimer(60);
-      setMessage(`+91 ${rawPhone} మొబైల్ నంబర్‌కు SMS ఓటీపీ పంపబడింది. మీ ఫోన్ మెసేజ్ బాక్స్ చూడండి.`);
+      setMessage(`+91 ${rawPhone} మొబైల్ నంబర్‌కు SMS ఓటీపీ పంపబడింది. మీ మెసేజ్ బాక్స్ చూడండి.`);
     } catch (err: unknown) {
       setBusy(false);
+      console.error('Firebase Phone Auth Error:', err);
+      // Reset reCAPTCHA on error so user can retry cleanly
+      if (window.recaptchaVerifier) {
+        try {
+          window.recaptchaVerifier.clear();
+          window.recaptchaVerifier = undefined;
+        } catch {}
+      }
       const msg = err instanceof Error ? err.message : 'ఓటీపీ పంపడం సాధ్యం కాలేదు.';
-      setError(msg);
+      if (msg.includes('billing-not-enabled')) {
+        setError('Firebase SMS పరిమితి చేరింది లేదా బిల్లింగ్ కాన్ఫిగర్ చేయలేదు. కింద ఉన్న త్వరిత ప్రవేశం ఉపయోగించండి.');
+      } else if (msg.includes('invalid-phone-number')) {
+        setError('సరైన 10 అంకెల మొబైల్ నంబర్ రాయండి.');
+      } else if (msg.includes('too-many-requests')) {
+        setError('చాలా సార్లు ప్రయత్నించారు. కాసేపు వేచి ఉండి మళ్ళీ ప్రయత్నించండి.');
+      } else {
+        setError('SMS పంపడం విఫలమైంది: ' + msg);
+      }
     }
   };
 
   // -------------------------------------------------------------
-  // 2. VERIFY REAL SMS OTP
+  // 2. VERIFY REAL SMS OTP & SYNC WITH SUPABASE DATABASE
   // -------------------------------------------------------------
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -156,21 +183,50 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
     setBusy(true);
 
     try {
-      const { data, error: verifyErr } = await supabase.auth.verifyOtp({
-        phone: `+91${rawPhone}`,
-        token: cleanCode,
-        type: 'sms',
-      });
-
-      setBusy(false);
-
-      if (verifyErr) {
-        setError(verifyErr.message || 'సరైన ఓటీపీ కోడ్ కాదు లేదా గడువు ముగిసింది.');
+      const confirmation = confirmationResult || window.confirmationResult;
+      if (!confirmation) {
+        setBusy(false);
+        setError('ఓటీపీ సెషన్ గడువు ముగిసింది. దయచేసి మళ్ళీ ఓటీపీ పంపండి.');
         return;
       }
 
-      const user = data.user;
-      if (user) {
+      // 1. Verify with Firebase
+      const result = await confirmation.confirm(cleanCode);
+      const fbUser = result.user;
+
+      if (!fbUser) {
+        setBusy(false);
+        setError('సరైన ఓటీపీ కోడ్ కాదు లేదా గడువు ముగిసింది.');
+        return;
+      }
+
+      // 2. Sync to Supabase so all database tables, complaints & roles work!
+      const residentEmail = `resident_${rawPhone}@pallenestam.org`;
+      const residentSecret = `Palle#${rawPhone}!VillageKey`;
+
+      let signInRes = await supabase.auth.signInWithPassword({
+        email: residentEmail,
+        password: residentSecret,
+      });
+
+      let authenticatedUser = signInRes.data?.user;
+
+      if (signInRes.error || !authenticatedUser) {
+        const signUpRes = await supabase.auth.signUp({
+          email: residentEmail,
+          password: residentSecret,
+          options: {
+            data: {
+              display_name: name.trim() || `గ్రామస్థులు (${rawPhone.slice(-4)})`,
+              phone: rawPhone,
+              requested_role: selectedRole,
+            },
+          },
+        });
+        authenticatedUser = signUpRes.data?.user;
+      }
+
+      if (authenticatedUser) {
         let actualRole: UserRole = selectedRole;
         let isPendingAdmin = false;
 
@@ -178,21 +234,21 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
           actualRole = 'citizen';
           isPendingAdmin = true;
           registerAdminApprovalRequest({
-            user_id: user.id,
-            display_name: name.trim() || user.user_metadata?.display_name || 'Admin Applicant',
+            user_id: authenticatedUser.id,
+            display_name: name.trim() || authenticatedUser.user_metadata?.display_name || 'Admin Applicant',
             phone: rawPhone,
-            email: user.email || '',
+            email: residentEmail,
           });
         }
 
         // Cache profile
         localStorage.setItem(
-          `palle_profile_${user.id}`,
+          `palle_profile_${authenticatedUser.id}`,
           JSON.stringify({
-            id: user.id,
-            display_name: name.trim() || user.user_metadata?.display_name || `గ్రామస్థులు (${rawPhone.slice(-4)})`,
+            id: authenticatedUser.id,
+            display_name: name.trim() || authenticatedUser.user_metadata?.display_name || `గ్రామస్థులు (${rawPhone.slice(-4)})`,
             phone: rawPhone,
-            email: user.email || '',
+            email: residentEmail,
             role: actualRole,
             pending_admin_approval: isPendingAdmin,
           })
@@ -201,18 +257,23 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
         // Update database table
         try {
           await supabase.from('profiles').upsert({
-            id: user.id,
+            id: authenticatedUser.id,
             display_name: name.trim() || undefined,
             role: actualRole,
           });
         } catch {}
       }
 
+      setBusy(false);
       onAuthenticated();
     } catch (err: unknown) {
       setBusy(false);
       const msg = err instanceof Error ? err.message : 'ఓటీపీ వెరిఫికేషన్ విఫలమైంది.';
-      setError(msg);
+      if (msg.includes('invalid-verification-code')) {
+        setError('సరైన ఓటీపీ కోడ్ కాదు. దయచేసి మళ్ళీ చూసి రాయండి.');
+      } else {
+        setError('వెరిఫికేషన్ విఫలమైంది: ' + msg);
+      }
     }
   };
 
@@ -245,7 +306,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
           (googleError as any).status === 400
         ) {
           setError(
-            'గూగుల్ లాగిన్ ఇంకా మీ Supabase లో కాన్ఫిగర్ చేయలేదు (Google Client ID అవసరం). కింద ఉన్న "త్వరిత పౌర ప్రవేశం" ఉపయోగించండి.'
+            'గూగుల్ లాగిన్ ఇంకా కాన్ఫిగర్ కాలేదు. పైన ఉన్న మొబైల్ ఓటీపీతో వెంటనే లాగిన్ అవ్వండి.'
           );
         } else {
           setError(googleError.message);
@@ -301,6 +362,9 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-[#e8f7ec] via-white to-[#e8f1f8] px-4 py-8 sm:px-6 animate-fade-in flex flex-col justify-center">
+      {/* Invisible reCAPTCHA container for Firebase Phone Auth */}
+      <div id="recaptcha-container" ref={recaptchaContainerRef} />
+
       <div className="mx-auto flex w-full max-w-[390px] flex-col">
         {/* Village Branding Header */}
         <div className="flex items-center gap-3 mb-6">
@@ -498,7 +562,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                 className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 py-3.5 text-sm font-bold text-white shadow-lg shadow-emerald-700/20 transition-all hover:opacity-95 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <ShieldCheck className="h-5 w-5" />}
-                {busy ? 'పంపుతున్నాము…' : 'ఓటీపీ పంపండి (Send OTP)'}
+                {busy ? 'SMS పంపుతున్నాము…' : 'ఓటీపీ పంపండి (Send OTP)'}
               </button>
             </form>
           ) : (
@@ -539,7 +603,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
 
               <div className="flex items-center justify-between text-xs">
                 <span className="text-slate-500">
-                  {timer > 0 ? `మళ్ళీ పంపడానికి: ${timer}s` : 'కోడ్ రాలేదా?'}
+                  {timer > 0 ? `మళ్ళీ పంపడానికి: ${timer}s` : 'SMS రాలేదా?'}
                 </span>
                 <button
                   type="button"
