@@ -45,7 +45,6 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
 
   // Status & Feedback
   const [busy, setBusy] = useState(false);
-  const [googleBusy, setGoogleBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Forgot Password Modal
@@ -158,7 +157,6 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
             gender,
             role: 'citizen',
           },
-          emailRedirectTo: `${window.location.origin}/`,
         },
       });
       if (signUpError) {
@@ -174,9 +172,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
           onAuthenticated(profile);
         }
       } else {
-        setError('Account created. Check your email to confirm the account, then sign in.');
-        setAuthMode('signin');
-        setLoginEmail(email);
+        setError('The account was created, but Supabase did not start a session. Disable email confirmations in Supabase Auth settings so email and password sign-in works immediately after registration.');
       }
     } catch {
       setError('Could not create the account. Check your connection and try again.');
@@ -211,78 +207,75 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
     }
   };
 
-  // -------------------------------------------------------------
-  // 3. GOOGLE SIGN-IN
-  // -------------------------------------------------------------
-  const handleGoogleSignIn = async () => {
-    setGoogleBusy(true);
-    setError(null);
-
-    const watchdog = setTimeout(() => {
-      setGoogleBusy(false);
-    }, 4000);
-
-    try {
-      const { error: googleError } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: window.location.origin,
-        },
-      });
-
-      clearTimeout(watchdog);
-      if (googleError) {
-        setGoogleBusy(false);
-        setError('Google Sign In is not yet configured. Please sign in with Email & Password.');
-      }
-    } catch {
-      clearTimeout(watchdog);
-      setGoogleBusy(false);
-      setError('Unable to launch Google Sign In. Please use Email & Password.');
-    }
-  };
-
   return (
-    <main className="min-h-screen bg-gradient-to-b from-[#e8f7ec] via-white to-[#e8f1f8] px-4 py-8 sm:px-6 animate-fade-in flex flex-col justify-center">
-      <div className="mx-auto w-full max-w-[420px]">
-        {/* Header Branding with Sarpanch Image */}
-        <div className="text-center mb-5">
-          <div className="relative inline-flex items-center justify-center">
-            <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-white shadow-xl shadow-emerald-900/15 ring-4 ring-emerald-600/30">
-              <img
-                src="/sarpanch.jpg"
-                alt="Tandlam Panchayat Sarpanch"
-                className="h-full w-full object-cover object-top"
-                onError={(e) => {
-                  (e.target as HTMLElement).style.display = 'none';
-                }}
-              />
+    <main className="auth-screen relative flex min-h-[100svh] items-center justify-center overflow-x-hidden px-3 py-4 sm:px-6 sm:py-8 animate-fade-in">
+      <div aria-hidden="true" className="auth-glow auth-glow-one" />
+      <div aria-hidden="true" className="auth-glow auth-glow-two" />
+      <div className="auth-layout relative z-10 mx-auto grid w-full max-w-5xl overflow-hidden rounded-[2rem] shadow-[0_32px_100px_-38px_rgba(15,48,34,.55)] lg:min-h-[680px] lg:grid-cols-[.92fr_1.08fr]">
+        <aside className="auth-hero relative isolate flex min-h-[205px] flex-col justify-between overflow-hidden px-6 py-5 text-white sm:min-h-[235px] sm:px-8 sm:py-7 lg:min-h-full lg:px-10 lg:py-10">
+          <img
+            src="/sarpanch.jpg"
+            alt="Tandlam Panchayat Sarpanch"
+            className="auth-hero-photo absolute inset-0 -z-20 h-full w-full object-cover object-[center_20%]"
+            onError={(e) => {
+              (e.target as HTMLElement).style.display = 'none';
+            }}
+          />
+          <div aria-hidden="true" className="absolute inset-0 -z-10 bg-gradient-to-br from-[#073b2d]/85 via-[#0c5643]/77 to-[#092c32]/90" />
+          <div aria-hidden="true" className="auth-hero-pattern absolute inset-0 -z-10 opacity-40" />
+
+          <div className="flex items-center gap-3">
+            <div className="h-12 w-12 shrink-0 overflow-hidden rounded-2xl border border-white/70 bg-white/15 shadow-lg ring-1 ring-white/30">
+              <img src="/palle-nestham-logo.png" alt="" className="h-full w-full bg-white object-contain p-0.5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-lg font-extrabold tracking-tight">Palle Nestham</p>
+              <p className="text-[10px] font-bold uppercase tracking-[.16em] text-emerald-100">Tandlam • Tirupati</p>
             </div>
           </div>
 
-          <h1 className="mt-2 text-2xl font-black tracking-tight text-slate-900 font-serif">
-            Palle Nestham
-          </h1>
-          <p className="text-xs font-bold uppercase tracking-wider text-emerald-800">
-            Tandlam Grama Panchayat • Tirupati District
-          </p>
-          <p className="mt-0.5 text-[11px] text-slate-500">
-            Citizen Grievance & Public Services Portal
-          </p>
-        </div>
+          <div className="relative mt-5 max-w-md lg:mt-auto lg:pb-2">
+            <span className="mb-2 inline-flex items-center rounded-full border border-white/25 bg-white/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[.16em] text-emerald-50 backdrop-blur-sm">
+              Your village, connected
+            </span>
+            <h1 className="text-2xl font-black leading-tight tracking-tight sm:text-3xl lg:text-4xl">
+              A better way to care for our community.
+            </h1>
+            <p className="mt-2 max-w-sm text-xs leading-relaxed text-white/85 sm:text-sm">
+              Raise concerns, follow local updates, and take part in village life—all in one place.
+            </p>
+            <div className="mt-4 hidden flex-wrap gap-2 sm:flex lg:mt-7">
+              <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white/95 backdrop-blur-sm">Citizen services</span>
+              <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white/95 backdrop-blur-sm">Complaint tracking</span>
+            </div>
+          </div>
+        </aside>
+
+        <section className="auth-panel min-w-0 px-5 py-6 sm:px-9 sm:py-8 lg:flex lg:items-center lg:px-12 lg:py-10">
+          <div className="mx-auto w-full max-w-[440px]">
+            <div className="mb-5 sm:mb-6">
+              <p className="auth-eyebrow text-[10px] font-extrabold uppercase tracking-[.2em]">Tandlam Grama Panchayat</p>
+              <h2 className="auth-heading mt-1 text-2xl font-black tracking-tight sm:text-[2rem]">
+                {authMode === 'signin' ? 'Welcome back' : 'Join your community'}
+              </h2>
+              <p className="auth-subtitle mt-1 text-sm">
+                {authMode === 'signin' ? 'Sign in to follow village services and updates.' : 'Create your citizen account in just a few steps.'}
+              </p>
+            </div>
 
         {/* Tab Switcher: Sign In vs Register */}
-        <div className="mb-4 grid grid-cols-2 gap-1 rounded-2xl bg-slate-200/80 p-1 text-xs font-bold text-slate-600">
+        <div className="auth-segment mb-5 grid grid-cols-2 gap-1 rounded-2xl p-1 text-xs font-bold">
           <button
             type="button"
+            aria-selected={authMode === 'signin'}
             onClick={() => {
               setAuthMode('signin');
               setError(null);
             }}
-            className={`flex items-center justify-center gap-1.5 rounded-xl py-2.5 transition-all ${
+            className={`auth-segment-button flex items-center justify-center gap-2 rounded-xl py-3 transition-all ${
               authMode === 'signin'
-                ? 'bg-white text-emerald-800 shadow-sm'
-                : 'hover:text-slate-900'
+                ? 'is-active'
+                : ''
             }`}
           >
             <UserCheck className="h-4 w-4" />
@@ -290,14 +283,15 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
           </button>
           <button
             type="button"
+            aria-selected={authMode === 'signup'}
             onClick={() => {
               setAuthMode('signup');
               setError(null);
             }}
-            className={`flex items-center justify-center gap-1.5 rounded-xl py-2.5 transition-all ${
+            className={`auth-segment-button flex items-center justify-center gap-2 rounded-xl py-3 transition-all ${
               authMode === 'signup'
-                ? 'bg-white text-emerald-800 shadow-sm'
-                : 'hover:text-slate-900'
+                ? 'is-active'
+                : ''
             }`}
           >
             <User className="h-4 w-4" />
@@ -306,7 +300,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
         </div>
 
         {/* Main Card */}
-        <section className="rounded-3xl border border-slate-200/80 bg-white/95 p-6 shadow-xl shadow-slate-900/5 backdrop-blur-sm">
+        <section className="auth-form-card rounded-[1.65rem] border p-5 shadow-sm sm:p-6">
           {/* Status Messages */}
           {error && (
             error.toLowerCase().includes('rate limit') || error.toLowerCase().includes('too many') ? (
@@ -331,7 +325,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
           {authMode === 'signin' ? (
             <form onSubmit={handleSignIn} className="space-y-4">
               <div>
-                <label className="mb-1.5 block text-xs font-bold text-slate-700">
+                <label className="auth-label mb-1.5 block text-xs font-bold">
                   Email Address
                 </label>
                 <div className="relative">
@@ -341,7 +335,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                     value={loginEmail}
                     onChange={(e) => setLoginEmail(e.target.value)}
                     placeholder="name@example.com"
-                    className="w-full rounded-2xl border border-slate-300 bg-white py-3 pl-10 pr-3.5 text-sm text-slate-900 outline-none transition focus:border-emerald-600 focus:ring-4 focus:ring-emerald-100"
+                    className="auth-input w-full rounded-2xl border py-3.5 pl-10 pr-3.5 text-sm outline-none transition"
                     autoFocus
                     required
                   />
@@ -349,7 +343,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
               </div>
 
               <div>
-                <label className="mb-1.5 block text-xs font-bold text-slate-700">
+                <label className="auth-label mb-1.5 block text-xs font-bold">
                   Password
                 </label>
                 <div className="relative">
@@ -359,7 +353,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                     value={loginPassword}
                     onChange={(e) => setLoginPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full rounded-2xl border border-slate-300 bg-white py-3 pl-10 pr-10 text-sm text-slate-900 outline-none transition focus:border-emerald-600 focus:ring-4 focus:ring-emerald-100"
+                    className="auth-input w-full rounded-2xl border py-3.5 pl-10 pr-10 text-sm outline-none transition"
                     required
                   />
                   <button
@@ -414,7 +408,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
             <form onSubmit={handleRegister} className="space-y-3.5">
               {/* Full Name */}
               <div>
-                <label className="mb-1 block text-xs font-bold text-slate-700">
+                <label className="auth-label mb-1 block text-xs font-bold">
                   Full Name <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative">
@@ -424,7 +418,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="e.g. Punith Kumar"
-                    className="w-full rounded-2xl border border-slate-300 bg-white py-2.5 pl-10 pr-3.5 text-sm text-slate-900 outline-none transition focus:border-emerald-600 focus:ring-4 focus:ring-emerald-100"
+                    className="auth-input w-full rounded-2xl border py-3 pl-10 pr-3.5 text-sm outline-none transition"
                     required
                   />
                 </div>
@@ -432,7 +426,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
 
               {/* Email */}
               <div>
-                <label className="mb-1 block text-xs font-bold text-slate-700">
+                <label className="auth-label mb-1 block text-xs font-bold">
                   Email Address <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative">
@@ -460,7 +454,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                     value={registerPassword}
                     onChange={(e) => setRegisterPassword(e.target.value)}
                     placeholder="At least 6 characters"
-                    className="w-full rounded-2xl border border-slate-300 bg-white py-2.5 pl-10 pr-10 text-sm text-slate-900 outline-none transition focus:border-emerald-600 focus:ring-4 focus:ring-emerald-100"
+                    className="auth-input w-full rounded-2xl border py-3 pl-10 pr-10 text-sm outline-none transition"
                     required
                     minLength={6}
                   />
@@ -476,7 +470,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
 
               {/* Mobile Number */}
               <div>
-                <label className="mb-1 block text-xs font-bold text-slate-700">
+                <label className="auth-label mb-1 block text-xs font-bold">
                   Mobile Number <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative flex items-center">
@@ -490,7 +484,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                     value={mobile}
                     onChange={(e) => setMobile(e.target.value.replace(/\D/g, ''))}
                     placeholder="9848012345"
-                    className="w-full rounded-2xl border border-slate-300 bg-white py-2.5 pl-16 pr-3.5 text-sm font-semibold tracking-wide text-slate-900 outline-none transition focus:border-emerald-600 focus:ring-4 focus:ring-emerald-100"
+                    className="auth-input w-full rounded-2xl border py-3 pl-16 pr-3.5 text-sm font-semibold tracking-wide outline-none transition"
                     required
                   />
                 </div>
@@ -498,17 +492,17 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
 
               {/* Gender Selection */}
               <div>
-                <label className="mb-1.5 block text-xs font-bold text-slate-700">
+                <label className="auth-label mb-1.5 block text-xs font-bold">
                   Gender <span className="text-rose-500">*</span>
                 </label>
                 <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
                     onClick={() => setGender('male')}
-                    className={`flex items-center justify-center gap-1 rounded-xl border py-2 text-xs font-bold transition-all ${
+                    className={`auth-choice flex items-center justify-center gap-1 rounded-xl border py-2.5 text-xs font-bold transition-all ${
                       gender === 'male'
-                        ? 'border-emerald-600 bg-emerald-50 text-emerald-900 ring-2 ring-emerald-500/20'
-                        : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                        ? 'is-selected'
+                        : ''
                     }`}
                   >
                     <span>Male</span>
@@ -516,10 +510,10 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                   <button
                     type="button"
                     onClick={() => setGender('female')}
-                    className={`flex items-center justify-center gap-1 rounded-xl border py-2 text-xs font-bold transition-all ${
+                    className={`auth-choice flex items-center justify-center gap-1 rounded-xl border py-2.5 text-xs font-bold transition-all ${
                       gender === 'female'
-                        ? 'border-emerald-600 bg-emerald-50 text-emerald-900 ring-2 ring-emerald-500/20'
-                        : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                        ? 'is-selected'
+                        : ''
                     }`}
                   >
                     <span>Female</span>
@@ -527,10 +521,10 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                   <button
                     type="button"
                     onClick={() => setGender('other')}
-                    className={`flex items-center justify-center gap-1 rounded-xl border py-2 text-xs font-bold transition-all ${
+                    className={`auth-choice flex items-center justify-center gap-1 rounded-xl border py-2.5 text-xs font-bold transition-all ${
                       gender === 'other'
-                        ? 'border-emerald-600 bg-emerald-50 text-emerald-900 ring-2 ring-emerald-500/20'
-                        : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                        ? 'is-selected'
+                        : ''
                     }`}
                   >
                     <span>Other</span>
@@ -545,7 +539,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                 className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 py-3.5 text-sm font-bold text-white shadow-lg shadow-emerald-700/20 transition-all hover:opacity-95 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <ArrowRight className="h-5 w-5" />}
-                {busy ? 'Creating account…' : 'Register & Sign In'}
+                {busy ? 'Creating account…' : 'Create Account'}
               </button>
 
               <div className="pt-1 text-center">
@@ -563,47 +557,16 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
             </form>
           )}
 
-          {/* Continue with Google */}
-          <div className="mt-4 pt-3 border-t border-slate-100">
-            <button
-              type="button"
-              disabled={googleBusy}
-              onClick={handleGoogleSignIn}
-              className="inline-flex w-full items-center justify-center gap-2.5 rounded-2xl border border-slate-200 bg-white py-3 text-xs font-bold text-slate-700 shadow-2xs transition hover:bg-slate-50 active:scale-[0.98] disabled:opacity-60"
-            >
-              {googleBusy ? (
-                <Loader2 className="h-4 w-4 animate-spin text-slate-500" />
-              ) : (
-                <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24">
-                  <path
-                    fill="#4285F4"
-                    d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 10.03 0 12s.45 3.82 1.25 5.42l4.03-3.15z"
-                  />
-                  <path
-                    fill="#EA4335"
-                    d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
-                  />
-                </svg>
-              )}
-              {googleBusy ? 'Connecting…' : 'Continue with Google'}
-            </button>
-          </div>
         </section>
 
         {/* Footer */}
-        <div className="mt-5 text-center">
-          <p className="text-[11px] text-slate-400">
+        <div className="auth-footer mt-5 text-center">
+          <p className="text-[11px]">
             Tandlam Grama Panchayat • Tirupati District
           </p>
         </div>
+      </div>
+        </section>
       </div>
 
       {/* ======================================================== */}
