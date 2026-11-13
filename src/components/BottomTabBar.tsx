@@ -5,17 +5,18 @@ export type Tab = 'dashboard' | 'report' | 'complaints' | 'officials' | 'profile
 interface BottomTabBarProps {
   active: Tab;
   onChange: (tab: Tab) => void;
+  isStaff?: boolean;
 }
 
 export default function BottomTabBar({ active, onChange }: BottomTabBarProps) {
   return (
     <nav className="fixed bottom-0 left-1/2 z-50 w-full max-w-[420px] -translate-x-1/2 border-t border-slate-200/80 bg-white/95 backdrop-blur-xl shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
-      {/* Floating Center Report Button with Pulsating Glow */}
+      {/* Floating Center Report Button */}
       <div className="absolute bottom-[calc(100%-12px)] left-1/2 -translate-x-1/2 pointer-events-auto">
         <button
           onClick={() => onChange('report')}
-          title="సమస్యను నివేదించండి • Report Issue"
-          className={`flex flex-col items-center justify-center rounded-full shadow-xl transition-all duration-300 active:scale-90 animate-pulse-glow ${
+          title="Report Grievance"
+          className={`flex flex-col items-center justify-center rounded-full shadow-xl transition-all duration-300 active:scale-90 ${
             active === 'report'
               ? 'bg-gradient-to-tr from-amber-500 via-orange-500 to-amber-600 shadow-orange-500/40 ring-4 ring-white scale-105'
               : 'bg-gradient-to-tr from-emerald-600 via-teal-600 to-emerald-700 shadow-emerald-700/35 ring-4 ring-white hover:scale-105'
@@ -39,11 +40,11 @@ export default function BottomTabBar({ active, onChange }: BottomTabBarProps) {
             strokeWidth={active === 'dashboard' ? 2.5 : 2}
           />
           <span
-            className={`text-[9px] font-black leading-tight ${
+            className={`text-[10px] font-bold leading-tight ${
               active === 'dashboard' ? 'text-emerald-800' : 'text-slate-400'
             }`}
           >
-            హోమ్
+            Home
           </span>
         </button>
 
@@ -59,26 +60,26 @@ export default function BottomTabBar({ active, onChange }: BottomTabBarProps) {
             strokeWidth={active === 'complaints' ? 2.5 : 2}
           />
           <span
-            className={`text-[9px] font-black leading-tight ${
+            className={`text-[10px] font-bold leading-tight ${
               active === 'complaints' ? 'text-emerald-800' : 'text-slate-400'
             }`}
           >
-            సమస్యలు
+            Complaints
           </span>
         </button>
 
         {/* Tab 3: Report (Center Spacer) */}
         <div className="flex flex-col items-center pt-5">
           <span
-            className={`text-[9px] font-black uppercase tracking-wider ${
+            className={`text-[10px] font-bold uppercase tracking-wider ${
               active === 'report' ? 'text-orange-600' : 'text-slate-500'
             }`}
           >
-            ఫిర్యాదు
+            Report
           </span>
         </div>
 
-        {/* Tab 4: Officials */}
+        {/* Tab 4: Panchayat Team */}
         <button
           onClick={() => onChange('officials')}
           className="flex flex-col items-center gap-0.5 py-2.5 transition-all duration-200 active:scale-95"
@@ -90,11 +91,11 @@ export default function BottomTabBar({ active, onChange }: BottomTabBarProps) {
             strokeWidth={active === 'officials' ? 2.5 : 2}
           />
           <span
-            className={`text-[9px] font-black leading-tight ${
+            className={`text-[10px] font-bold leading-tight ${
               active === 'officials' ? 'text-emerald-800' : 'text-slate-400'
             }`}
           >
-            అధికారులు
+            Panchayat
           </span>
         </button>
 
@@ -110,11 +111,11 @@ export default function BottomTabBar({ active, onChange }: BottomTabBarProps) {
             strokeWidth={active === 'profile' ? 2.5 : 2}
           />
           <span
-            className={`text-[9px] font-black leading-tight ${
+            className={`text-[10px] font-bold leading-tight ${
               active === 'profile' ? 'text-emerald-800' : 'text-slate-400'
             }`}
           >
-            ప్రొఫైల్
+            Profile
           </span>
         </button>
       </div>

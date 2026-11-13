@@ -139,7 +139,7 @@ export function roleMeta(role: string) {
 
 // ---- User Profile ----
 
-export type UserRole = 'citizen' | 'official' | 'admin';
+export type UserRole = 'citizen' | 'sarpanch' | 'admin';
 export type UserGender = 'male' | 'female' | 'other';
 
 export interface UserProfile {
@@ -148,6 +148,7 @@ export interface UserProfile {
   phone: string;
   email: string;
   gender?: string;
+  aadhaar?: string;
   role: UserRole;
   pending_admin_approval?: boolean;
   created_at?: string;
@@ -200,6 +201,7 @@ export async function fetchCurrentProfile(): Promise<UserProfile | null> {
     phone: meta.phone || user.phone || cached?.phone || '',
     email: user.email || cached?.email || '',
     gender: meta.gender || cached?.gender || '',
+    aadhaar: meta.aadhaar || cached?.aadhaar || '',
     role: resolvedRole,
     pending_admin_approval: isPendingAdmin && resolvedRole !== 'admin',
     created_at: user.created_at,
@@ -211,7 +213,7 @@ export async function fetchCurrentProfile(): Promise<UserProfile | null> {
 
 export async function saveProfileDetails(
   userId: string,
-  updates: { display_name?: string; phone?: string; role?: UserRole; pending_admin_approval?: boolean }
+  updates: { display_name?: string; phone?: string; aadhaar?: string; role?: UserRole; pending_admin_approval?: boolean }
 ): Promise<{ success: boolean; error?: string }> {
   try {
     // 1. Update Auth metadata
@@ -219,6 +221,7 @@ export async function saveProfileDetails(
       data: {
         ...(updates.display_name !== undefined ? { display_name: updates.display_name } : {}),
         ...(updates.phone !== undefined ? { phone: updates.phone } : {}),
+        ...(updates.aadhaar !== undefined ? { aadhaar: updates.aadhaar } : {}),
         ...(updates.pending_admin_approval !== undefined ? { pending_admin_approval: updates.pending_admin_approval } : {}),
       },
     });

@@ -22,6 +22,7 @@ import PriorityBadge from './PriorityBadge';
 
 interface ComplaintListProps {
   onSelectComplaint: (id: number) => void;
+  isStaff?: boolean;
 }
 
 type SortKey = 'newest' | 'oldest' | 'upvotes';

@@ -82,7 +82,13 @@ export default function Officials() {
               >
                 <div className="flex items-start gap-3">
                   {/* Avatar */}
-                  {o.photo_url ? (
+                  {o.role === 'sarpanch' ? (
+                    <img
+                      src="/sarpanch.jpg"
+                      alt={o.name}
+                      className="h-14 w-14 shrink-0 rounded-full object-cover object-top ring-2 ring-emerald-400 shadow-xs"
+                    />
+                  ) : o.photo_url ? (
                     <img
                       src={o.photo_url}
                       alt={o.name}
