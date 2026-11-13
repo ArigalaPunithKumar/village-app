@@ -140,12 +140,14 @@ export function roleMeta(role: string) {
 // ---- User Profile ----
 
 export type UserRole = 'citizen' | 'official' | 'admin';
+export type UserGender = 'male' | 'female' | 'other';
 
 export interface UserProfile {
   id: string;
   display_name: string;
   phone: string;
   email: string;
+  gender?: string;
   role: UserRole;
   pending_admin_approval?: boolean;
   created_at?: string;
@@ -197,6 +199,7 @@ export async function fetchCurrentProfile(): Promise<UserProfile | null> {
     display_name: dbName || meta.display_name || meta.full_name || cached?.display_name || '',
     phone: meta.phone || user.phone || cached?.phone || '',
     email: user.email || cached?.email || '',
+    gender: meta.gender || cached?.gender || '',
     role: resolvedRole,
     pending_admin_approval: isPendingAdmin && resolvedRole !== 'admin',
     created_at: user.created_at,

@@ -80,6 +80,15 @@ export default function ReportForm({ onSubmitted }: ReportFormProps) {
   // 1. Auto load profile details (name & phone)
   useEffect(() => {
     async function loadUser() {
+      try {
+        const stored = localStorage.getItem('palle_current_user');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed.display_name && !reporterName) setReporterName(parsed.display_name);
+          if (parsed.phone && !reporterPhone) setReporterPhone(parsed.phone);
+        }
+      } catch {}
+
       const p = await fetchCurrentProfile();
       if (p) {
         if (p.display_name && !reporterName) setReporterName(p.display_name);
