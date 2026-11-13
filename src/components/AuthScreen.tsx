@@ -6,9 +6,6 @@ import {
   Phone,
   ArrowRight,
   Loader2,
-  Building2,
-  ShieldCheck,
-  Crown,
   AlertCircle,
   Eye,
   EyeOff,
@@ -19,10 +16,8 @@ import {
 } from 'lucide-react';
 import {
   supabase,
-  registerAdminApprovalRequest,
-  checkIfFirstAdmin,
+  fetchCurrentProfile,
   type UserProfile,
-  type UserRole,
   type UserGender,
 } from '@/lib/supabase';
 
@@ -47,7 +42,6 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
   const [showRegisterPassword, setShowRegisterPassword] = useState(false);
   const [mobile, setMobile] = useState('');
   const [gender, setGender] = useState<UserGender>('male');
-  const [selectedRole, setSelectedRole] = useState<UserRole>('citizen');
 
   // Status & Feedback
   const [busy, setBusy] = useState(false);
@@ -57,41 +51,11 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
   // Forgot Password Modal
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
-  const [forgotNewPassword, setForgotNewPassword] = useState('');
   const [forgotSuccess, setForgotSuccess] = useState<string | null>(null);
   const [forgotError, setForgotError] = useState<string | null>(null);
   const [forgotLoading, setForgotLoading] = useState(false);
 
   const cleanPhone = (val: string) => val.replace(/\D/g, '').slice(0, 10);
-
-  // Helper to get local user registry
-  const getLocalRegistry = (): any[] => {
-    try {
-      const raw = localStorage.getItem('palle_user_registry');
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  };
-
-  // Helper to save to local registry
-  const saveToLocalRegistry = (profile: UserProfile, password: string) => {
-    try {
-      const registry = getLocalRegistry();
-      const existingIdx = registry.findIndex(
-        (u: any) => u.email?.toLowerCase() === profile.email.toLowerCase()
-      );
-      const entry = { ...profile, password };
-      if (existingIdx >= 0) {
-        registry[existingIdx] = entry;
-      } else {
-        registry.push(entry);
-      }
-      localStorage.setItem('palle_user_registry', JSON.stringify(registry));
-    } catch (e) {
-      console.warn('Could not save to local registry', e);
-    }
-  };
 
   // -------------------------------------------------------------
   // 1. SIGN IN (Email & Password - Direct & Instant)
@@ -110,122 +74,42 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
 
     setBusy(true);
 
-    // 1. Check local registry first for fast instant login without email block
-    const registry = getLocalRegistry();
-    const localMatch = registry.find(
-      (u: any) => u.email?.toLowerCase() === email && u.password === password
-    );
-
-    // If account was blocked by Admin, reject immediately
-    if (localMatch?.blocked) {
-      setBusy(false);
-      setError('Your resident account has been suspended by the Village Admin. Please contact Gram Panchayat office.');
-      return;
-    }
-
     try {
-      // 2. Attempt Supabase Auth
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
-
-      if (!signInError && data?.user) {
-        const user = data.user;
-        const meta = user.user_metadata || {};
-
-        let dbRole: UserRole = (meta.role as UserRole) || localMatch?.role || 'citizen';
-        let dbName = meta.display_name || meta.full_name || localMatch?.display_name || '';
-
-        try {
-          const { data: profileRow } = await supabase
-            .from('profiles')
-            .select('display_name, role')
-            .eq('id', user.id)
-            .maybeSingle();
-
-          if (profileRow) {
-            if (profileRow.role) dbRole = profileRow.role as UserRole;
-            if (profileRow.display_name) dbName = profileRow.display_name;
-          }
-        } catch {}
-
-        const profile: UserProfile = {
-          id: user.id,
-          display_name: dbName || email.split('@')[0],
-          phone: meta.phone || localMatch?.phone || '',
-          email: user.email || email,
-          gender: meta.gender || localMatch?.gender || '',
-          aadhaar: meta.aadhaar || localMatch?.aadhaar || '',
-          role: dbRole,
-          created_at: user.created_at,
-        };
-
-        localStorage.setItem('palle_current_user', JSON.stringify(profile));
-        localStorage.setItem(`palle_profile_${user.id}`, JSON.stringify(profile));
-        saveToLocalRegistry(profile, password);
-
-        setBusy(false);
-        onAuthenticated(profile);
-        return;
-      }
-
-      // If Supabase returned an error (e.g. Email not confirmed, or rate limit)
-      // Check if we have a matching registered user locally!
-      if (localMatch) {
-        const profile: UserProfile = {
-          id: localMatch.id || `user_${Date.now()}`,
-          display_name: localMatch.display_name,
-          phone: localMatch.phone,
-          email: localMatch.email,
-          gender: localMatch.gender,
-          aadhaar: localMatch.aadhaar || '',
-          role: localMatch.role || 'citizen',
-          created_at: localMatch.created_at,
-        };
-
-        localStorage.setItem('palle_current_user', JSON.stringify(profile));
-        localStorage.setItem(`palle_profile_${profile.id}`, JSON.stringify(profile));
-
-        setBusy(false);
-        onAuthenticated(profile);
-        return;
-      }
-
-      // If no local match and Supabase failed
-      setBusy(false);
       if (signInError) {
         const errMsg = signInError.message.toLowerCase();
         if (errMsg.includes('invalid login credentials') || errMsg.includes('invalid credentials')) {
           setError('Invalid email or password. Please verify and try again.');
         } else if (errMsg.includes('email not confirmed')) {
-          // If Supabase says not confirmed but user is trying to log in, proceed with local profile if exists
-          setError('Invalid email or password. Please check your credentials or register.');
+          setError('Please confirm your email address before signing in.');
         } else {
           setError(signInError.message);
         }
-      } else {
-        setError('Invalid email or password. Please verify and try again.');
-      }
-    } catch (err: unknown) {
-      if (localMatch) {
-        const profile: UserProfile = {
-          id: localMatch.id,
-          display_name: localMatch.display_name,
-          phone: localMatch.phone,
-          email: localMatch.email,
-          gender: localMatch.gender,
-          aadhaar: localMatch.aadhaar || '',
-          role: localMatch.role || 'citizen',
-        };
-        localStorage.setItem('palle_current_user', JSON.stringify(profile));
         setBusy(false);
-        onAuthenticated(profile);
         return;
       }
-
-      setBusy(false);
+      if (!data.session) {
+        setError('The sign-in did not create an active session. Please try again.');
+        setBusy(false);
+        return;
+      }
+      const profile = await fetchCurrentProfile();
+      if (!profile) {
+        await supabase.auth.signOut();
+        setError('Your account profile could not be loaded. Contact the Panchayat administrator.');
+      } else if (profile.blocked || !profile.is_active) {
+        await supabase.auth.signOut();
+        setError('This account is blocked or inactive. Contact the Gram Panchayat office.');
+      } else {
+        onAuthenticated(profile);
+      }
+    } catch {
       setError('Connection error. Please try again.');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -262,46 +146,6 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
 
     setBusy(true);
 
-    const resolvedId = `user_${Date.now()}`;
-    let actualRole: UserRole = selectedRole;
-    let isPendingAdmin = false;
-
-    if (selectedRole === 'admin') {
-      const isFirst = await checkIfFirstAdmin();
-      if (isFirst) {
-        // First Admin: highest level of privileges directly without approval!
-        actualRole = 'admin';
-        isPendingAdmin = false;
-      } else {
-        // Subsequent Admin: requires approval of the First Admin
-        actualRole = 'citizen';
-        isPendingAdmin = true;
-        registerAdminApprovalRequest({
-          user_id: resolvedId,
-          display_name: trimmedName,
-          phone: rawPhone,
-          email,
-        });
-      }
-    }
-
-    const userProfile: UserProfile = {
-      id: resolvedId,
-      display_name: trimmedName,
-      phone: rawPhone,
-      email,
-      gender,
-      role: actualRole,
-      pending_admin_approval: isPendingAdmin,
-      created_at: new Date().toISOString(),
-    };
-
-    // Save to local registry and active user so user is NEVER blocked by Supabase email rate limits
-    localStorage.setItem('palle_current_user', JSON.stringify(userProfile));
-    localStorage.setItem(`palle_profile_${resolvedId}`, JSON.stringify(userProfile));
-    saveToLocalRegistry(userProfile, password);
-
-    // Attempt Supabase signUp in the background (swallow any email rate limit error)
     try {
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email,
@@ -312,33 +156,33 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
             full_name: trimmedName,
             phone: rawPhone,
             gender,
-            role: selectedRole,
+            role: 'citizen',
           },
+          emailRedirectTo: `${window.location.origin}/`,
         },
       });
-
-      if (signUpData?.user) {
-        userProfile.id = signUpData.user.id;
-        localStorage.setItem('palle_current_user', JSON.stringify(userProfile));
-        localStorage.setItem(`palle_profile_${signUpData.user.id}`, JSON.stringify(userProfile));
-        saveToLocalRegistry(userProfile, password);
-
-        // Sync with profiles table
-        try {
-          await supabase.from('profiles').upsert({
-            id: signUpData.user.id,
-            display_name: trimmedName,
-            role: actualRole,
-          });
-        } catch {}
+      if (signUpError) {
+        setError(signUpError.message);
+        return;
       }
-    } catch (bgError) {
-      console.warn('Background Supabase registration notice (proceeding locally):', bgError);
+      if (signUpData.session) {
+        const profile = await fetchCurrentProfile();
+        if (!profile) {
+          await supabase.auth.signOut();
+          setError('Your account was created, but its profile could not be loaded. Contact support.');
+        } else {
+          onAuthenticated(profile);
+        }
+      } else {
+        setError('Account created. Check your email to confirm the account, then sign in.');
+        setAuthMode('signin');
+        setLoginEmail(email);
+      }
+    } catch {
+      setError('Could not create the account. Check your connection and try again.');
+    } finally {
+      setBusy(false);
     }
-
-    // Immediately log the user in!
-    setBusy(false);
-    onAuthenticated(userProfile);
   };
 
   // -------------------------------------------------------------
@@ -354,37 +198,16 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
       setForgotError('Please enter your registered email address.');
       return;
     }
-    if (forgotNewPassword.length < 6) {
-      setForgotError('New password must be at least 6 characters long.');
-      return;
-    }
-
     setForgotLoading(true);
 
     try {
-      // 1. Update in local registry
-      const registry = getLocalRegistry();
-      const idx = registry.findIndex((u: any) => u.email?.toLowerCase() === email);
-      if (idx >= 0) {
-        registry[idx].password = forgotNewPassword;
-        localStorage.setItem('palle_user_registry', JSON.stringify(registry));
-      }
-
-      // 2. Also send reset email in the background if configured
-      try {
-        await supabase.auth.resetPasswordForEmail(email);
-      } catch {}
-
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/` });
+      if (error) throw error;
+      setForgotSuccess('If an account exists for that email, a secure password reset link is on its way.');
+    } catch (err) {
+      setForgotError(err instanceof Error ? err.message : 'Could not send the password reset link. Please try again.');
+    } finally {
       setForgotLoading(false);
-      setForgotSuccess('Password updated successfully! You can now log in.');
-      setLoginEmail(email);
-      setLoginPassword(forgotNewPassword);
-      setTimeout(() => {
-        setShowForgotModal(false);
-      }, 2000);
-    } catch {
-      setForgotLoading(false);
-      setForgotError('Could not reset password. Please try again.');
     }
   };
 
@@ -715,59 +538,6 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                 </div>
               </div>
 
-              {/* Role Selection (Citizen, Sarpanch, Admin) */}
-              <div>
-                <label className="mb-1.5 block text-xs font-bold text-slate-700">
-                  Role in Village
-                </label>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {/* Citizen */}
-                  <button
-                    type="button"
-                    onClick={() => setSelectedRole('citizen')}
-                    className={`flex flex-col items-center justify-center rounded-xl border p-2.5 text-center transition-all ${
-                      selectedRole === 'citizen'
-                        ? 'border-emerald-600 bg-emerald-50/90 text-emerald-950 ring-2 ring-emerald-600/20'
-                        : 'border-slate-200 bg-slate-50/60 text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    <User className="h-4 w-4 text-emerald-700 mb-0.5" />
-                    <span className="text-xs font-bold">Citizen</span>
-                    <span className="text-[10px] text-slate-500">Resident</span>
-                  </button>
-
-                  {/* Sarpanch */}
-                  <button
-                    type="button"
-                    onClick={() => setSelectedRole('sarpanch')}
-                    className={`flex flex-col items-center justify-center rounded-xl border p-2.5 text-center transition-all ${
-                      selectedRole === 'sarpanch'
-                        ? 'border-blue-600 bg-blue-50/90 text-blue-950 ring-2 ring-blue-600/20'
-                        : 'border-slate-200 bg-slate-50/60 text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    <ShieldCheck className="h-4 w-4 text-blue-700 mb-0.5" />
-                    <span className="text-xs font-bold">Sarpanch</span>
-                    <span className="text-[10px] text-slate-500">Village Head</span>
-                  </button>
-
-                  {/* Admin */}
-                  <button
-                    type="button"
-                    onClick={() => setSelectedRole('admin')}
-                    className={`flex flex-col items-center justify-center rounded-xl border p-2.5 text-center transition-all ${
-                      selectedRole === 'admin'
-                        ? 'border-purple-600 bg-purple-50/90 text-purple-950 ring-2 ring-purple-600/20'
-                        : 'border-slate-200 bg-slate-50/60 text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    <Crown className="h-4 w-4 text-purple-700 mb-0.5" />
-                    <span className="text-xs font-bold">Admin</span>
-                    <span className="text-[10px] text-slate-500">Panchayat</span>
-                  </button>
-                </div>
-              </div>
-
               {/* Submit Button */}
               <button
                 type="submit"
@@ -896,20 +666,9 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                 />
               </div>
 
-              <div>
-                <label className="mb-1 block text-xs font-bold text-slate-700">
-                  Enter New Password
-                </label>
-                <input
-                  type="password"
-                  value={forgotNewPassword}
-                  onChange={(e) => setForgotNewPassword(e.target.value)}
-                  placeholder="At least 6 characters"
-                  className="w-full rounded-2xl border border-slate-300 p-2.5 text-xs text-slate-900 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
-                  required
-                  minLength={6}
-                />
-              </div>
+              <p className="text-xs leading-relaxed text-slate-500">
+                We’ll email a one-time secure link so you can choose a new password.
+              </p>
 
               <div className="grid grid-cols-2 gap-2 pt-2">
                 <button
@@ -921,7 +680,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                 </button>
                 <button
                   type="submit"
-                  disabled={forgotLoading || !forgotEmail || forgotNewPassword.length < 6}
+                  disabled={forgotLoading || !forgotEmail}
                   className="inline-flex items-center justify-center gap-1 rounded-2xl bg-emerald-600 py-2.5 text-xs font-bold text-white shadow-md shadow-emerald-600/30 hover:bg-emerald-700 disabled:opacity-50"
                 >
                   {forgotLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}

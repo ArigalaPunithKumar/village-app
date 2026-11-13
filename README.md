@@ -12,10 +12,12 @@ A modern, mobile-first Gram Panchayat citizen grievance redressal and public ser
 - **📱 Real SMS / WhatsApp OTP Sign-In**: Instant phone login with verification code delivery via SMS or WhatsApp.
 - **📍 Auto GPS Location Detection**: Pinpoints problem location automatically with reverse-geocoded village street & landmark information.
 - **📸 Direct Photo Capture & Upload**: Citizens capture live camera proof or upload photos directly from their device.
-- **👮 Distinct Official & Admin Console**:
-  - Village authorities can inspect complaints, change statuses (*Under Review*, *In Progress*, *Resolved*), and add official remarks.
+- **👮 Distinct Citizen, Sarpanch & Admin access**:
+  - Citizens manage only their own complaints, view village notices, vote in polls, and send suggestions.
+  - Sarpanch accounts review every complaint, publish announcements, create polls/events, and view village analytics.
+  - Admin accounts invite users, assign roles, manage account access, and review audit history.
   - One-click **Call Citizen** link to follow up directly with the resident.
-  - Role governance: Admin registrations require approval by active administrators.
+  - Roles are read from protected database profiles; signup and browser storage cannot grant elevated roles.
 - **👤 Resident Profile**: View and update full name, mandatory mobile number, view submitted grievance count, and change security password anytime.
 - **📊 Real-time Community Transparency**: Public dashboard displaying overall resolution rate, category breakdowns (Roads, Water, Electricity, Sanitation), and live village announcement tickers.
 
@@ -54,3 +56,22 @@ npm run cap:build
 # 4. Open Android project in Android Studio (optional)
 npm run cap:open
 ```
+
+## Supabase security setup
+
+Apply the migrations before deploying the updated client. This migration locks complaint records to their citizen owner, protects staff actions with row-level policies, and creates the village communication tables and notification triggers.
+
+```bash
+supabase db push
+supabase functions deploy admin-user-management
+```
+
+New signups are always Citizens. To bootstrap the first Admin, create and confirm that account, then run this once in the Supabase SQL editor using the intended email:
+
+```sql
+UPDATE public.profiles
+SET role = 'admin'
+WHERE email = 'admin@example.com';
+```
+
+After that, Admins can invite Citizen, Sarpanch, and Admin accounts from Account Management. Invitations and password-reset links use Supabase Auth email delivery, so configure the project's email provider and allowed redirect URLs first.

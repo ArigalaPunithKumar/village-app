@@ -10,13 +10,10 @@ import {
   Camera,
   UploadCloud,
   X,
-  ChevronLeft,
   Navigation,
-  Sparkles,
   Copy,
   Check,
   Building2,
-  AlertTriangle,
 } from 'lucide-react';
 import {
   supabase,
@@ -39,6 +36,7 @@ const CATEGORIES: { key: ComplaintCategory; label: string; icon: string }[] = [
   { key: 'sanitation', label: 'Sanitation & Cleanliness', icon: 'Trash' },
   { key: 'drainage', label: 'Drainage & Sewage', icon: 'Waves' },
   { key: 'waste', label: 'Garbage Collection', icon: 'Recycle' },
+  { key: 'infrastructure', label: 'Public Infrastructure', icon: 'Building' },
   { key: 'other', label: 'Other Village Issue', icon: 'AlertCircle' },
 ];
 
@@ -85,19 +83,10 @@ export default function ReportForm({ onSubmitted }: ReportFormProps) {
   // Auto load profile details (name & phone)
   useEffect(() => {
     async function loadUser() {
-      try {
-        const stored = localStorage.getItem('palle_current_user');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (parsed.display_name && !reporterName) setReporterName(parsed.display_name);
-          if (parsed.phone && !reporterPhone) setReporterPhone(parsed.phone);
-        }
-      } catch {}
-
       const p = await fetchCurrentProfile();
       if (p) {
-        if (p.display_name && !reporterName) setReporterName(p.display_name);
-        if (p.phone && !reporterPhone) setReporterPhone(p.phone);
+        if (p.display_name) setReporterName((current) => current || p.display_name);
+        if (p.phone) setReporterPhone((current) => current || p.phone);
       }
     }
     loadUser();

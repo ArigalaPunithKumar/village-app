@@ -1,123 +1,41 @@
-import { Home, FilePlus, ListFilter, Users, UserRound } from 'lucide-react';
+import { Bell, Building2, FilePlus, Home, ListFilter, Settings, UserRound } from 'lucide-react';
+import type { UserRole } from '@/lib/supabase';
 
-export type Tab = 'dashboard' | 'report' | 'complaints' | 'officials' | 'profile';
+export type Tab = 'dashboard' | 'report' | 'complaints' | 'community' | 'officials' | 'profile' | 'settings';
 
 interface BottomTabBarProps {
   active: Tab;
+  role: UserRole;
   onChange: (tab: Tab) => void;
-  isStaff?: boolean;
 }
 
-export default function BottomTabBar({ active, onChange }: BottomTabBarProps) {
+export default function BottomTabBar({ active, role, onChange }: BottomTabBarProps) {
+  const citizen = role === 'citizen';
+  const tabs = [
+    { key: 'dashboard' as const, label: 'Home', Icon: Home },
+    { key: 'complaints' as const, label: citizen ? 'My Reports' : 'Complaints', Icon: ListFilter },
+    ...(citizen ? [{ key: 'report' as const, label: 'Report', Icon: FilePlus }] : []),
+    { key: 'community' as const, label: citizen ? 'Village' : 'Public notices', Icon: Bell },
+    ...(role === 'sarpanch' ? [{ key: 'officials' as const, label: 'Team', Icon: Building2 }] : []),
+    ...(role === 'admin' ? [{ key: 'settings' as const, label: 'Settings', Icon: Settings }] : []),
+    { key: 'profile' as const, label: role === 'admin' ? 'Accounts' : 'Profile', Icon: UserRound },
+  ];
+
   return (
-    <nav className="fixed bottom-0 left-1/2 z-50 w-full max-w-[420px] -translate-x-1/2 border-t border-slate-200/80 bg-white/95 backdrop-blur-xl shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
-      {/* Floating Center Report Button */}
-      <div className="absolute bottom-[calc(100%-12px)] left-1/2 -translate-x-1/2 pointer-events-auto">
-        <button
-          onClick={() => onChange('report')}
-          title="Report Grievance"
-          className={`flex flex-col items-center justify-center rounded-full shadow-xl transition-all duration-300 active:scale-90 ${
-            active === 'report'
-              ? 'bg-gradient-to-tr from-amber-500 via-orange-500 to-amber-600 shadow-orange-500/40 ring-4 ring-white scale-105'
-              : 'bg-gradient-to-tr from-emerald-600 via-teal-600 to-emerald-700 shadow-emerald-700/35 ring-4 ring-white hover:scale-105'
-          }`}
-          style={{ width: '56px', height: '56px' }}
-        >
-          <FilePlus className="h-6 w-6 text-white" />
-        </button>
-      </div>
-
-      <div className="grid grid-cols-5 items-center px-1">
-        {/* Tab 1: Home */}
-        <button
-          onClick={() => onChange('dashboard')}
-          className="flex flex-col items-center gap-0.5 py-2.5 transition-all duration-200 active:scale-95"
-        >
-          <Home
-            className={`h-5 w-5 transition-transform ${
-              active === 'dashboard' ? 'text-emerald-700 scale-110' : 'text-slate-400'
-            }`}
-            strokeWidth={active === 'dashboard' ? 2.5 : 2}
-          />
-          <span
-            className={`text-[10px] font-bold leading-tight ${
-              active === 'dashboard' ? 'text-emerald-800' : 'text-slate-400'
-            }`}
-          >
-            Home
-          </span>
-        </button>
-
-        {/* Tab 2: Complaints */}
-        <button
-          onClick={() => onChange('complaints')}
-          className="flex flex-col items-center gap-0.5 py-2.5 transition-all duration-200 active:scale-95"
-        >
-          <ListFilter
-            className={`h-5 w-5 transition-transform ${
-              active === 'complaints' ? 'text-emerald-700 scale-110' : 'text-slate-400'
-            }`}
-            strokeWidth={active === 'complaints' ? 2.5 : 2}
-          />
-          <span
-            className={`text-[10px] font-bold leading-tight ${
-              active === 'complaints' ? 'text-emerald-800' : 'text-slate-400'
-            }`}
-          >
-            Complaints
-          </span>
-        </button>
-
-        {/* Tab 3: Report (Center Spacer) */}
-        <div className="flex flex-col items-center pt-5">
-          <span
-            className={`text-[10px] font-bold uppercase tracking-wider ${
-              active === 'report' ? 'text-orange-600' : 'text-slate-500'
-            }`}
-          >
-            Report
-          </span>
-        </div>
-
-        {/* Tab 4: Panchayat Team */}
-        <button
-          onClick={() => onChange('officials')}
-          className="flex flex-col items-center gap-0.5 py-2.5 transition-all duration-200 active:scale-95"
-        >
-          <Users
-            className={`h-5 w-5 transition-transform ${
-              active === 'officials' ? 'text-emerald-700 scale-110' : 'text-slate-400'
-            }`}
-            strokeWidth={active === 'officials' ? 2.5 : 2}
-          />
-          <span
-            className={`text-[10px] font-bold leading-tight ${
-              active === 'officials' ? 'text-emerald-800' : 'text-slate-400'
-            }`}
-          >
-            Panchayat
-          </span>
-        </button>
-
-        {/* Tab 5: Profile */}
-        <button
-          onClick={() => onChange('profile')}
-          className="flex flex-col items-center gap-0.5 py-2.5 transition-all duration-200 active:scale-95"
-        >
-          <UserRound
-            className={`h-5 w-5 transition-transform ${
-              active === 'profile' ? 'text-emerald-700 scale-110' : 'text-slate-400'
-            }`}
-            strokeWidth={active === 'profile' ? 2.5 : 2}
-          />
-          <span
-            className={`text-[10px] font-bold leading-tight ${
-              active === 'profile' ? 'text-emerald-800' : 'text-slate-400'
-            }`}
-          >
-            Profile
-          </span>
-        </button>
+    <nav aria-label={`${role} navigation`} className="fixed bottom-0 left-1/2 z-50 w-full max-w-[1100px] -translate-x-1/2 border-t border-slate-200/80 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
+      <div className="mx-auto grid max-w-4xl items-center px-1" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}>
+        {tabs.map(({ key, label, Icon }) => {
+          const isActive = active === key;
+          const isReport = key === 'report';
+          return (
+            <button key={key} onClick={() => onChange(key)} aria-current={isActive ? 'page' : undefined} title={label} className={`flex min-h-14 flex-col items-center justify-center gap-1 px-1 py-2 transition active:scale-95 ${isReport ? '-mt-4' : ''}`}>
+              <span className={`flex h-9 w-9 items-center justify-center rounded-xl transition ${isReport ? 'bg-gradient-to-br from-emerald-600 to-teal-700 text-white shadow-lg shadow-emerald-700/30' : isActive ? 'bg-emerald-50 text-emerald-800' : 'text-slate-400'}`}>
+                <Icon className="h-5 w-5" strokeWidth={isActive ? 2.5 : 2} />
+              </span>
+              <span className={`text-[10px] font-bold leading-tight ${isActive ? 'text-emerald-800' : 'text-slate-400'}`}>{label}</span>
+            </button>
+          );
+        })}
       </div>
     </nav>
   );

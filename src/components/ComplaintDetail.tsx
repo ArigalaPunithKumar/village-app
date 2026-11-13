@@ -32,6 +32,7 @@ interface ComplaintDetailProps {
   complaintId: number;
   onBack: () => void;
   canUpdate: boolean;
+  canReopen: boolean;
   isAdmin?: boolean;
   updatedBy: string;
 }
@@ -44,13 +45,14 @@ const STATUS_OPTIONS: ComplaintStatus[] = [
   'rejected',
 ];
 
-export default function ComplaintDetail({ complaintId, onBack, canUpdate, isAdmin = false, updatedBy }: ComplaintDetailProps) {
+export default function ComplaintDetail({ complaintId, onBack, canUpdate, canReopen, isAdmin = false, updatedBy }: ComplaintDetailProps) {
   const [complaint, setComplaint] = useState<ComplaintWithUpdates | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [newStatus, setNewStatus] = useState<ComplaintStatus>('under_review');
   const [newNote, setNewNote] = useState('');
+  const [newEvidence, setNewEvidence] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [showUpdateForm, setShowUpdateForm] = useState(false);
@@ -59,6 +61,9 @@ export default function ComplaintDetail({ complaintId, onBack, canUpdate, isAdmi
   // Delete modal state
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [reopenReason, setReopenReason] = useState('');
+  const [reopening, setReopening] = useState(false);
+  const [reopenError, setReopenError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -97,6 +102,7 @@ export default function ComplaintDetail({ complaintId, onBack, canUpdate, isAdmi
         complaint_id: complaint.id,
         status: newStatus,
         note: newNote.trim() || null,
+        evidence_url: newEvidence || null,
         updated_by: updatedBy.trim(),
       })
       .select('*')
@@ -122,6 +128,7 @@ export default function ComplaintDetail({ complaintId, onBack, canUpdate, isAdmi
       };
     });
     setNewNote('');
+    setNewEvidence('');
     setSubmitting(false);
     setShowUpdateForm(false);
   };
@@ -172,10 +179,44 @@ export default function ComplaintDetail({ complaintId, onBack, canUpdate, isAdmi
   const handleConfirmDelete = async () => {
     if (!complaint) return;
     setDeleting(true);
-    await adminDeleteComplaint(complaint.id);
+    const result = await adminDeleteComplaint(complaint.id);
     setDeleting(false);
-    setShowDeleteModal(false);
-    onBack();
+    if (result.success) {
+      setShowDeleteModal(false);
+      onBack();
+    } else {
+      setSubmitError(result.error || 'The complaint could not be archived.');
+    }
+  };
+
+  const handleReopen = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!complaint) return;
+    setReopening(true);
+    setReopenError(null);
+    const { error: reopenFailure } = await supabase.rpc('reopen_complaint', {
+      p_complaint_id: complaint.id,
+      p_reason: reopenReason.trim(),
+    });
+    if (reopenFailure) {
+      setReopenError(reopenFailure.message);
+      setReopening(false);
+      return;
+    }
+    const { data } = await supabase.from('complaints').select('*, status_updates(*)').eq('id', complaint.id).single();
+    if (data) setComplaint(data as ComplaintWithUpdates);
+    setReopenReason('');
+    setReopening(false);
+  };
+
+  const handleEvidence = (file?: File) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return setSubmitError('Choose an image file.');
+    if (file.size > 1_500_000) return setSubmitError('Choose an image smaller than 1.5 MB.');
+    const reader = new FileReader();
+    reader.onload = () => setNewEvidence(String(reader.result || ''));
+    reader.onerror = () => setSubmitError('Could not read the selected image.');
+    reader.readAsDataURL(file);
   };
 
   return (
@@ -220,7 +261,7 @@ export default function ComplaintDetail({ complaintId, onBack, canUpdate, isAdmi
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <StatusBadge status={complaint.status} size="sm" />
             <PriorityBadge priority={complaint.priority} size="sm" />
-            <button
+            {canUpdate && <button
               onClick={handleUpvote}
               disabled={upvoted}
               className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors ${
@@ -231,7 +272,7 @@ export default function ComplaintDetail({ complaintId, onBack, canUpdate, isAdmi
             >
               <ThumbsUp className="h-3 w-3" />
               {complaint.upvotes}
-            </button>
+            </button>}
           </div>
         </div>
 
@@ -311,6 +352,15 @@ export default function ComplaintDetail({ complaintId, onBack, canUpdate, isAdmi
       {/* Status timeline */}
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <h2 className="text-[14px] font-semibold text-slate-900">Status Timeline</h2>
+        {canReopen && complaint.status === 'resolved' && (
+          <form onSubmit={handleReopen} className="mt-3 space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
+            <label className="block text-xs font-bold text-amber-950">Issue still unresolved? Reopen this complaint
+              <textarea required minLength={3} maxLength={500} rows={2} value={reopenReason} onChange={(event) => setReopenReason(event.target.value)} placeholder="Tell the Sarpanch what remains unresolved" className="mt-1 w-full rounded-lg border border-amber-200 bg-white p-2 text-xs text-slate-900" />
+            </label>
+            {reopenError && <p role="alert" className="text-xs text-rose-700">{reopenError}</p>}
+            <button disabled={reopening || reopenReason.trim().length < 3} className="rounded-lg bg-amber-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{reopening ? 'Reopening…' : 'Reopen complaint'}</button>
+          </form>
+        )}
         {updates.length === 0 ? (
           <div className="mt-3 flex items-center gap-2 text-[12px] text-slate-400">
             <Clock className="h-4 w-4" />
@@ -339,6 +389,7 @@ export default function ComplaintDetail({ complaintId, onBack, canUpdate, isAdmi
                       </span>
                     </div>
                     {u.note && <p className="mt-1.5 text-[12px] text-slate-600">{u.note}</p>}
+                    {u.evidence_url && <img src={u.evidence_url} alt="Official action evidence" className="mt-2 max-h-48 rounded-xl border border-slate-200 object-cover" />}
                     <p className="mt-0.5 text-[10px] font-medium text-slate-400">By {u.updated_by}</p>
                   </div>
                 </div>
@@ -390,17 +441,18 @@ export default function ComplaintDetail({ complaintId, onBack, canUpdate, isAdmi
             </div>
             <div>
               <label className="mb-1 block text-[11px] font-medium text-slate-600">
-                Note (optional)
+                {newStatus === 'rejected' ? 'Reason for rejection (required)' : 'Update note (optional)'}
               </label>
               <textarea
                 value={newNote}
                 onChange={(e) => setNewNote(e.target.value)}
                 rows={2}
                 maxLength={500}
-                placeholder="Add a note..."
+                placeholder={newStatus === 'rejected' ? 'Explain why this complaint cannot be actioned' : 'Record the action taken...'}
                 className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-900 placeholder:text-slate-400 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
               />
             </div>
+            {newStatus === 'resolved' && <div className="space-y-2"><label className="block text-[11px] font-semibold text-slate-600">Resolution photo (optional, up to 1.5 MB)<input type="file" accept="image/*" onChange={(event) => handleEvidence(event.target.files?.[0])} className="mt-1 block w-full rounded-lg border border-slate-200 bg-white p-2 text-xs" /></label>{newEvidence && <img src={newEvidence} alt="Resolution evidence preview" className="max-h-36 rounded-xl object-cover" />}</div>}
             {submitError && (
               <div className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2">
                 <AlertCircle className="h-3.5 w-3.5 text-rose-500" />
@@ -449,9 +501,11 @@ export default function ComplaintDetail({ complaintId, onBack, canUpdate, isAdmi
             <div className="text-center">
               <h3 className="text-base font-black text-slate-900">Delete Grievance Report</h3>
               <p className="mt-1 text-xs text-slate-500 leading-relaxed">
-                As Admin, are you sure you want to permanently delete this report (Ticket #{complaint.ticket_number})? This action cannot be reversed.
+                Archive ticket #{complaint.ticket_number}? The history will be retained for accountability and removed from active complaint lists.
               </p>
             </div>
+
+            {submitError && <p role="alert" className="rounded-xl bg-rose-50 p-2 text-xs text-rose-700">{submitError}</p>}
 
             <div className="grid grid-cols-2 gap-3 pt-2">
               <button

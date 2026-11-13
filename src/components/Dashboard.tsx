@@ -1,25 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ClipboardList,
   Clock,
   Loader2,
   CheckCircle2,
   ChevronRight,
-  ThumbsUp,
   MapPin,
   Wrench,
   AlertTriangle,
-  Shield,
   Sparkles,
   Phone,
   Check,
   X,
-  Eye,
-  Filter,
-  User,
   Building2,
   Trash2,
-  Crown,
   Send,
   MessageSquare,
 } from 'lucide-react';
@@ -27,11 +21,9 @@ import {
   supabase,
   type Complaint,
   type ComplaintStatus,
+  type StatusUpdate,
   type UserRole,
   CATEGORY_META,
-  PRIORITY_META,
-  STATUS_META,
-  getPendingAdminRequests,
   adminDeleteComplaint,
 } from '@/lib/supabase';
 import CategoryIcon from './CategoryIcon';
@@ -61,6 +53,18 @@ interface ComplaintWithAction extends Complaint {
   latest_action_at?: string;
 }
 
+interface VillageMetrics {
+  citizens: number;
+  total: number;
+  pending: number;
+  in_progress: number;
+  resolved: number;
+  resolution_percent: number;
+  average_resolution_hours: number | null;
+  by_category: Record<string, number>;
+  monthly: Array<{ month: string; count: number }>;
+}
+
 export default function Dashboard({
   onNavigate,
   onSelectComplaint,
@@ -76,31 +80,29 @@ export default function Dashboard({
     urgent: 0,
   });
   const [complaints, setComplaints] = useState<ComplaintWithAction[]>([]);
+  const [villageMetrics, setVillageMetrics] = useState<VillageMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [feedFilter, setFeedFilter] = useState<'all' | 'urgent' | 'pending' | 'resolved'>('all');
-  const [actionBusyId, setActionBusyId] = useState<number | null>(null);
 
   // Sarpanch Action Modal
   const [actionModalItem, setActionModalItem] = useState<{ id: number; targetStatus: ComplaintStatus; title: string } | null>(null);
   const [actionNote, setActionNote] = useState('');
   const [submittingAction, setSubmittingAction] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Admin Delete Modal
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // Pending admin requests count
-  const pendingAdminCount = role === 'admin'
-    ? getPendingAdminRequests().filter((r) => r.status === 'pending').length
-    : 0;
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
-      const [allRes, recentRes, updatesRes] = await Promise.all([
+      const [allRes, recentRes, updatesRes, metricsRes] = await Promise.all([
         supabase.from('complaints').select('status, priority'),
         supabase.from('complaints').select('*').order('created_at', { ascending: false }).limit(30),
         supabase.from('status_updates').select('*').order('created_at', { ascending: false }),
+        isStaff ? supabase.rpc('get_village_metrics') : Promise.resolve({ data: null, error: null }),
       ]);
+      if (metricsRes.data) setVillageMetrics(metricsRes.data as VillageMetrics);
 
       const items = allRes.data ?? [];
       setStats({
@@ -116,9 +118,9 @@ export default function Dashboard({
         ).length,
       });
 
-      const updates = updatesRes.data ?? [];
+      const updates = (updatesRes.data ?? []) as StatusUpdate[];
       const list = ((recentRes.data ?? []) as Complaint[]).map((c) => {
-        const relatedUpdates = updates.filter((u: any) => u.complaint_id === c.id);
+        const relatedUpdates = updates.filter((u) => u.complaint_id === c.id);
         const latest = relatedUpdates[0];
         return {
           ...c,
@@ -134,15 +136,16 @@ export default function Dashboard({
     } finally {
       setLoading(false);
     }
-  };
+  }, [isStaff]);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    void loadData();
+  }, [loadData]);
 
   // Quick action trigger: opens action modal for Sarpanch / Staff
   const openActionModal = (e: React.MouseEvent, complaint: Complaint, targetStatus: ComplaintStatus) => {
     e.stopPropagation();
+    setActionError(null);
     setActionModalItem({ id: complaint.id, targetStatus, title: complaint.title });
     setActionNote(
       targetStatus === 'resolved'
@@ -155,47 +158,24 @@ export default function Dashboard({
   const handleConfirmAction = async () => {
     if (!actionModalItem) return;
     setSubmittingAction(true);
+    setActionError(null);
     const { id: complaintId, targetStatus } = actionModalItem;
 
     try {
-      const { error: updateError } = await supabase
-        .from('complaints')
-        .update({
-          status: targetStatus,
-          updated_at: new Date().toISOString(),
-          ...(targetStatus === 'resolved' ? { resolved_at: new Date().toISOString() } : {}),
-        })
-        .eq('id', complaintId);
-
-      if (!updateError) {
-        const updater = userName || (role === 'sarpanch' ? 'Village Sarpanch' : 'Admin');
-        try {
-          await supabase.from('status_updates').insert({
-            complaint_id: complaintId,
-            status: targetStatus,
-            note: actionNote.trim() || `Status updated to ${targetStatus} by ${updater}.`,
-            updated_by: updater,
-          });
-        } catch {}
-
-        setComplaints((prev) =>
-          prev.map((c) =>
-            c.id === complaintId
-              ? {
-                  ...c,
-                  status: targetStatus,
-                  latest_action: actionNote.trim(),
-                  latest_action_by: updater,
-                  latest_action_at: new Date().toISOString(),
-                }
-              : c
-          )
-        );
-        loadData();
+      const updater = userName || (role === 'sarpanch' ? 'Village Sarpanch' : 'Admin');
+      const { error: updateError } = await supabase.from('status_updates').insert({
+        complaint_id: complaintId,
+        status: targetStatus,
+        note: actionNote.trim() || `Status updated to ${targetStatus} by ${updater}.`,
+        updated_by: updater,
+      });
+      if (updateError) setActionError(updateError.message);
+      else {
+        setActionModalItem(null);
+        await loadData();
       }
     } finally {
       setSubmittingAction(false);
-      setActionModalItem(null);
     }
   };
 
@@ -208,9 +188,13 @@ export default function Dashboard({
   const confirmDeleteReport = async () => {
     if (!deleteConfirmId) return;
     setDeleting(true);
-    await adminDeleteComplaint(deleteConfirmId);
-    setComplaints((prev) => prev.filter((c) => c.id !== deleteConfirmId));
-    setStats((prev) => ({ ...prev, total: Math.max(0, prev.total - 1) }));
+    const result = await adminDeleteComplaint(deleteConfirmId);
+    if (result.success) {
+      setComplaints((prev) => prev.filter((c) => c.id !== deleteConfirmId));
+      setStats((prev) => ({ ...prev, total: Math.max(0, prev.total - 1) }));
+    } else {
+      setActionError(result.error || 'The complaint could not be archived.');
+    }
     setDeleting(false);
     setDeleteConfirmId(null);
   };
@@ -232,14 +216,23 @@ export default function Dashboard({
   });
 
   return (
-    <div className="space-y-4 pb-12 animate-fade-in">
+    <div className="relative z-10 space-y-4 pb-12 animate-fade-in">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none fixed inset-0 -z-0 bg-cover bg-center opacity-100"
+        style={{
+          backgroundImage: "linear-gradient(rgba(248,250,252,.86), rgba(248,250,252,.95)), url('/village-home-background.png')",
+          backgroundSize: 'cover',
+          backgroundPosition: 'center 24%',
+        }}
+      />
       {/* ======================================================== */}
       {/* 1. HERO BANNER WITH SARPANCH PHOTO IN THE BACKGROUND     */}
       {/* ======================================================== */}
       <section
         className="relative overflow-hidden rounded-3xl p-6 text-white shadow-xl shadow-emerald-950/25 bg-cover bg-center animate-slide-up"
         style={{
-          backgroundImage: `linear-gradient(135deg, rgba(8, 45, 28, 0.94) 0%, rgba(10, 50, 75, 0.88) 55%, rgba(10, 35, 60, 0.70) 100%), url('/sarpanch.jpg')`,
+          backgroundImage: `linear-gradient(135deg, rgba(8, 45, 28, 0.82) 0%, rgba(10, 50, 75, 0.72) 55%, rgba(10, 35, 60, 0.70) 100%), url('/village-home-background.png')`,
           backgroundSize: 'cover',
           backgroundPosition: 'top center',
         }}
@@ -283,31 +276,26 @@ export default function Dashboard({
         </div>
       </section>
 
-      {/* ======================================================== */}
-      {/* FIRST ADMIN NOTIFICATION BANNER (IF PENDING REQUESTS)    */}
-      {/* ======================================================== */}
-      {role === 'admin' && pendingAdminCount > 0 && (
-        <div
-          onClick={() => onNavigate('profile')}
-          className="cursor-pointer rounded-2xl border border-amber-300 bg-amber-50 p-3.5 text-amber-950 shadow-sm flex items-center justify-between transition hover:bg-amber-100"
-        >
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-400 text-amber-950 font-black">
-              <Crown className="h-4 w-4" />
+      {isStaff && villageMetrics && (
+        <section className="space-y-3 rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-sm backdrop-blur-sm sm:p-5">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <MetricTile label="Registered citizens" value={villageMetrics.citizens} />
+            <MetricTile label="Resolved" value={`${villageMetrics.resolution_percent}%`} />
+            <MetricTile label="Avg. resolution" value={villageMetrics.average_resolution_hours == null ? '—' : `${villageMetrics.average_resolution_hours}h`} />
+            <MetricTile label="All complaints" value={villageMetrics.total} />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <h3 className="mb-2 text-xs font-bold text-slate-700">Issues by category</h3>
+              <div className="space-y-2">{Object.entries(villageMetrics.by_category).sort((a,b) => b[1] - a[1]).map(([category, count]) => <div key={category} className="grid grid-cols-[minmax(0,1fr)_2fr_auto] items-center gap-2 text-[10px]"><span className="truncate text-slate-600">{CATEGORY_META[category as keyof typeof CATEGORY_META]?.label || category}</span><span className="h-2 overflow-hidden rounded-full bg-slate-100"><span className="block h-full rounded-full bg-emerald-500" style={{ width: `${Math.max(4, count / Math.max(1, ...Object.values(villageMetrics.by_category)) * 100)}%` }} /></span><span className="font-bold text-slate-700">{count}</span></div>)}</div>
             </div>
             <div>
-              <p className="text-xs font-bold text-amber-950">
-                {pendingAdminCount} Pending Admin Approval Request(s)
-              </p>
-              <p className="text-[10px] text-amber-800">
-                New user requested admin privileges. Tap to accept or deny.
-              </p>
+              <h3 className="mb-2 text-xs font-bold text-slate-700">Monthly complaints</h3>
+              <div className="flex h-24 items-end gap-2">{villageMetrics.monthly.map((month) => { const top = Math.max(1, ...villageMetrics.monthly.map((entry) => entry.count)); return <div key={month.month} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1"><span className="text-[9px] font-bold text-slate-600">{month.count}</span><span className="w-full rounded-t-md bg-teal-500" style={{ height: `${Math.max(5, month.count / top * 64)}%` }} /><span className="text-[9px] text-slate-400">{new Date(month.month).toLocaleDateString('en-IN', { month: 'short' })}</span></div>; })}</div>
+              {villageMetrics.monthly.length === 0 && <p className="text-[10px] text-slate-400">No complaint history in the last six months.</p>}
             </div>
           </div>
-          <span className="text-xs font-extrabold text-amber-900 underline shrink-0">
-            Review &rarr;
-          </span>
-        </div>
+        </section>
       )}
 
       {/* ======================================================== */}
@@ -360,7 +348,7 @@ export default function Dashboard({
             <p className="text-[11px] text-slate-500">
               {isStaff
                 ? 'Scroll through citizen issues and update status directly.'
-                : 'Public grievances reported in Tandlam Panchayat.'}
+              : 'Your submitted complaints and their current status.'}
             </p>
           </div>
 
@@ -552,7 +540,7 @@ export default function Dashboard({
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          disabled={actionBusyId === complaint.id || complaint.status === 'in_progress'}
+                          disabled={submittingAction || complaint.status === 'in_progress'}
                           onClick={(e) => openActionModal(e, complaint, 'in_progress')}
                           className="inline-flex items-center gap-1 rounded-xl bg-sky-50 px-3 py-1.5 text-xs font-bold text-sky-800 hover:bg-sky-100 active:scale-95 disabled:opacity-40 border border-sky-200"
                         >
@@ -562,7 +550,7 @@ export default function Dashboard({
 
                         <button
                           type="button"
-                          disabled={actionBusyId === complaint.id || complaint.status === 'resolved'}
+                          disabled={submittingAction || complaint.status === 'resolved'}
                           onClick={(e) => openActionModal(e, complaint, 'resolved')}
                           className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 active:scale-95 disabled:opacity-40 shadow-xs"
                         >
@@ -613,6 +601,8 @@ export default function Dashboard({
             <p className="text-xs font-semibold text-slate-700 line-clamp-1">
               Issue: "{actionModalItem.title}"
             </p>
+
+            {actionError && <p role="alert" className="rounded-xl bg-rose-50 p-2.5 text-xs text-rose-800">{actionError}</p>}
 
             <div>
               <label className="mb-1 block text-xs font-bold text-slate-700">
@@ -686,10 +676,10 @@ export default function Dashboard({
 
             <div className="text-center">
               <h3 className="text-base font-black text-slate-900">Delete Grievance Report</h3>
-              <p className="mt-1 text-xs text-slate-500 leading-relaxed">
-                As Admin, are you sure you want to permanently delete this report? This action cannot be undone.
-              </p>
+              <p className="mt-1 text-xs text-slate-500 leading-relaxed">Archive this complaint from active lists? Its history will be retained for accountability.</p>
             </div>
+
+            {actionError && <p role="alert" className="rounded-xl bg-rose-50 p-2 text-xs text-rose-700">{actionError}</p>}
 
             <div className="grid grid-cols-2 gap-3 pt-2">
               <button
@@ -714,4 +704,8 @@ export default function Dashboard({
       )}
     </div>
   );
+}
+
+function MetricTile({ label, value }: { label: string; value: string | number }) {
+  return <div className="rounded-xl border border-slate-100 bg-slate-50 p-3"><p className="text-[10px] font-semibold text-slate-500">{label}</p><p className="mt-1 text-lg font-black text-slate-900">{value}</p></div>;
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { LogOut, MapPin, Camera, ShieldCheck, Check } from 'lucide-react';
+import { LogOut, MapPin, Camera, ShieldCheck } from 'lucide-react';
 import BottomTabBar, { type Tab } from '@/components/BottomTabBar';
 import MobileTopBar from '@/components/MobileTopBar';
 import Dashboard from '@/components/Dashboard';
@@ -9,6 +9,9 @@ import ComplaintList from '@/components/ComplaintList';
 import ComplaintDetail from '@/components/ComplaintDetail';
 import Officials from '@/components/Officials';
 import ProfileScreen from '@/components/ProfileScreen';
+import CommunityScreen from '@/components/CommunityScreen';
+import SettingsScreen from '@/components/SettingsScreen';
+import { applyStoredPreferences } from '@/lib/preferences';
 import AuthScreen from '@/components/AuthScreen';
 import SplashScreen from '@/components/SplashScreen';
 import { supabase, fetchCurrentProfile, type UserProfile, type UserRole } from '@/lib/supabase';
@@ -18,6 +21,8 @@ type Screen =
   | { view: 'report' }
   | { view: 'complaints' }
   | { view: 'officials' }
+  | { view: 'community' }
+  | { view: 'settings' }
   | { view: 'profile' }
   | { view: 'success'; ticketNumber: string }
   | { view: 'detail'; complaintId: number };
@@ -28,20 +33,15 @@ const TAB_TITLES: Record<Tab, string> = {
   complaints: 'Complaints Feed',
   officials: 'Panchayat Team',
   profile: 'Resident Profile',
+  community: 'Village Community',
+  settings: 'Settings',
 };
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(() => {
-    try {
-      const stored = localStorage.getItem('palle_current_user');
-      return stored ? JSON.parse(stored) : null;
-    } catch {
-      return null;
-    }
-  });
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [role, setRole] = useState<UserRole>('citizen');
   const [screen, setScreen] = useState<Screen>({ view: 'dashboard' });
 
@@ -51,34 +51,43 @@ export default function App() {
   // One-time permission prompt for first-time users
   const [showPermissionPrompt, setShowPermissionPrompt] = useState(false);
 
-  const loadUserData = useCallback(async () => {
-    // Read local resident login first for instant responsiveness
-    try {
-      const storedRaw = localStorage.getItem('palle_current_user');
-      if (storedRaw) {
-        const parsed = JSON.parse(storedRaw);
-        setUserProfile(parsed);
-        setRole(parsed.role || 'citizen');
-      }
-    } catch (e) {
-      console.warn('Error reading stored user', e);
-    }
+  useEffect(() => {
+    // Remove credentials and elevated-role flags written by the former local-only auth flow.
+    localStorage.removeItem('palle_user_registry');
+    localStorage.removeItem('palle_current_user');
+    localStorage.removeItem('palle_admin_approval_queue');
+    applyStoredPreferences();
+  }, []);
 
+  const loadUserData = useCallback(async () => {
     try {
       const { data } = await supabase.auth.getSession();
       setSession(data.session);
 
       if (data.session) {
         const p = await fetchCurrentProfile();
-        if (p) {
+        if (p && !p.blocked && p.is_active) {
           setUserProfile(p);
           setRole(p.role);
+        } else {
+          localStorage.removeItem('palle_current_user');
+          setUserProfile(null);
+          setRole('citizen');
+          await supabase.auth.signOut();
         }
+      } else {
+        localStorage.removeItem('palle_current_user');
+        setUserProfile(null);
+        setRole('citizen');
       }
     } catch (sessionErr) {
       console.warn('Supabase getSession notice', sessionErr);
+      setSession(null);
+      setUserProfile(null);
+      setRole('citizen');
+    } finally {
+      setAuthLoading(false);
     }
-    setAuthLoading(false);
   }, []);
 
   useEffect(() => {
@@ -87,6 +96,9 @@ export default function App() {
       setSession(nextSession);
       if (nextSession) {
         void loadUserData();
+      } else {
+        setUserProfile(null);
+        setRole('citizen');
       }
     });
     return () => listener.subscription.unsubscribe();
@@ -116,21 +128,10 @@ export default function App() {
 
   const handleConfirmLogout = async () => {
     setShowLogoutConfirm(false);
-    localStorage.removeItem('palle_current_user');
     await supabase.auth.signOut();
     setUserProfile(null);
     setRole('citizen');
     setScreen({ view: 'dashboard' });
-  };
-
-  const handleRoleChange = (newRole: UserRole) => {
-    setRole(newRole);
-    setUserProfile((prev) => {
-      if (!prev) return null;
-      const updated = { ...prev, role: newRole };
-      localStorage.setItem('palle_current_user', JSON.stringify(updated));
-      return updated;
-    });
   };
 
   const isStaff = role === 'sarpanch' || role === 'admin';
@@ -140,7 +141,10 @@ export default function App() {
       ? 'complaints'
       : (screen.view as Tab);
 
-  const handleTabChange = (tab: Tab) => setScreen({ view: tab });
+  const handleTabChange = (tab: Tab) => {
+    if (tab === 'report' && role !== 'citizen') return;
+    setScreen({ view: tab });
+  };
   const handleSelectComplaint = (id: number) => setScreen({ view: 'detail', complaintId: id });
 
   const topTitle =
@@ -169,7 +173,7 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen justify-center bg-slate-100 font-sans">
-      <div className="relative w-full max-w-[420px] bg-slate-50 shadow-2xl min-h-screen">
+      <div className="relative w-full max-w-[1100px] bg-slate-50 shadow-2xl min-h-screen">
         <MobileTopBar
           title={topTitle}
           email={userProfile?.email || session?.user?.email || ''}
@@ -179,7 +183,7 @@ export default function App() {
           onSignOut={() => setShowLogoutConfirm(true)}
         />
 
-        <main className="min-h-[calc(100vh-56px)] px-4 pb-28 pt-4">
+        <main className="min-h-[calc(100vh-56px)] px-4 pb-28 pt-4 sm:px-6 lg:px-8">
           {screen.view === 'dashboard' && (
             <Dashboard
               onNavigate={handleTabChange}
@@ -200,13 +204,21 @@ export default function App() {
             <ComplaintList onSelectComplaint={handleSelectComplaint} isStaff={isStaff} />
           )}
 
-          {screen.view === 'officials' && <Officials isStaff={isStaff} />}
+          {screen.view === 'officials' && <Officials />}
+
+          {screen.view === 'community' && userProfile && (
+            <CommunityScreen userId={userProfile.id} role={role} onOpenOfficials={() => handleTabChange('officials')} />
+          )}
+
+          {screen.view === 'settings' && (
+            <SettingsScreen role={role} onSignOut={() => setShowLogoutConfirm(true)} />
+          )}
 
           {screen.view === 'profile' && userProfile && (
             <ProfileScreen
               profile={userProfile}
-              onRoleChange={handleRoleChange}
               onSignOut={() => setShowLogoutConfirm(true)}
+              onOpenSettings={() => setScreen({ view: 'settings' })}
             />
           )}
 
@@ -215,6 +227,7 @@ export default function App() {
               complaintId={screen.complaintId}
               onBack={() => setScreen({ view: 'complaints' })}
               canUpdate={isStaff}
+              canReopen={role === 'citizen'}
               isAdmin={role === 'admin'}
               updatedBy={userProfile?.display_name || 'Panchayat Team'}
             />
@@ -229,7 +242,7 @@ export default function App() {
           )}
         </main>
 
-        <BottomTabBar active={activeTab} onChange={handleTabChange} isStaff={isStaff} />
+        <BottomTabBar active={activeTab} onChange={handleTabChange} role={role} />
 
         {/* ======================================================== */}
         {/* ONE-TIME FIRST-LOGIN PERMISSIONS PROMPT                 */}
