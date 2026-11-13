@@ -150,6 +150,7 @@ export interface UserProfile {
   gender?: string;
   aadhaar?: string;
   role: UserRole;
+  blocked?: boolean;
   pending_admin_approval?: boolean;
   created_at?: string;
 }
@@ -307,4 +308,176 @@ export function resolveAdminRequest(userId: string, approve: boolean): { success
     supabase.from('profiles').update({ role: 'admin' }).eq('id', userId).then(() => {});
   }
   return { success: true };
+}
+
+// -------------------------------------------------------------
+// Admin Privileges & User Management
+// -------------------------------------------------------------
+
+export async function checkIfFirstAdmin(): Promise<boolean> {
+  try {
+    // Check Supabase profiles for any existing admin
+    const { count, error } = await supabase
+      .from('profiles')
+      .select('*', { count: 'exact', head: true })
+      .eq('role', 'admin');
+    
+    if (!error && typeof count === 'number') {
+      if (count > 0) return false;
+    }
+
+    // Check local registry
+    const registryRaw = localStorage.getItem('palle_user_registry');
+    if (registryRaw) {
+      const registry: any[] = JSON.parse(registryRaw);
+      const hasAdmin = registry.some((u) => u.role === 'admin');
+      if (hasAdmin) return false;
+    }
+
+    return true; // No admin exists yet -> this will be the first admin
+  } catch {
+    return true;
+  }
+}
+
+export async function fetchAllUsersForAdmin(): Promise<UserProfile[]> {
+  const usersMap = new Map<string, UserProfile>();
+
+  // 1. Load from local registry
+  try {
+    const raw = localStorage.getItem('palle_user_registry');
+    if (raw) {
+      const list: any[] = JSON.parse(raw);
+      list.forEach((u) => {
+        usersMap.set(u.email?.toLowerCase() || u.id, {
+          id: u.id || `user_${u.email}`,
+          display_name: u.display_name || 'Resident',
+          phone: u.phone || '',
+          email: u.email || '',
+          role: u.role || 'citizen',
+          gender: u.gender,
+          aadhaar: u.aadhaar,
+          blocked: Boolean(u.blocked),
+          created_at: u.created_at || new Date().toISOString(),
+        });
+      });
+    }
+  } catch {}
+
+  // 2. Fetch from Supabase profiles
+  try {
+    const { data } = await supabase.from('profiles').select('*');
+    if (data && Array.isArray(data)) {
+      data.forEach((p: any) => {
+        const key = p.email?.toLowerCase() || p.id;
+        const existing = usersMap.get(key);
+        usersMap.set(key, {
+          id: p.id,
+          display_name: p.display_name || existing?.display_name || 'User',
+          phone: p.phone || existing?.phone || '',
+          email: p.email || existing?.email || '',
+          role: (p.role as UserRole) || existing?.role || 'citizen',
+          gender: p.gender || existing?.gender,
+          aadhaar: p.aadhaar || existing?.aadhaar,
+          blocked: p.blocked !== undefined ? Boolean(p.blocked) : existing?.blocked || false,
+          created_at: p.created_at || existing?.created_at,
+        });
+      });
+    }
+  } catch (err) {
+    console.warn('Could not fetch profiles for admin:', err);
+  }
+
+  return Array.from(usersMap.values());
+}
+
+export async function adminToggleBlockUser(
+  userId: string,
+  userEmail: string,
+  blocked: boolean
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // 1. Update in local registry
+    const raw = localStorage.getItem('palle_user_registry');
+    if (raw) {
+      const list: any[] = JSON.parse(raw);
+      const updated = list.map((u) => {
+        if (u.id === userId || u.email?.toLowerCase() === userEmail.toLowerCase()) {
+          return { ...u, blocked };
+        }
+        return u;
+      });
+      localStorage.setItem('palle_user_registry', JSON.stringify(updated));
+    }
+
+    // 2. Update user profile cache
+    const cachedRaw = localStorage.getItem(`palle_profile_${userId}`);
+    if (cachedRaw) {
+      const p = JSON.parse(cachedRaw);
+      p.blocked = blocked;
+      localStorage.setItem(`palle_profile_${userId}`, JSON.stringify(p));
+    }
+
+    // 3. Update Supabase
+    try {
+      await supabase.from('profiles').update({ blocked }).eq('id', userId);
+    } catch {}
+
+    return { success: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Failed to update user status';
+    return { success: false, error: msg };
+  }
+}
+
+export async function adminResetUserPassword(
+  userId: string,
+  userEmail: string,
+  newPassword: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    if (!newPassword || newPassword.length < 6) {
+      return { success: false, error: 'Password must be at least 6 characters' };
+    }
+
+    // 1. Update in local registry
+    const raw = localStorage.getItem('palle_user_registry');
+    if (raw) {
+      const list: any[] = JSON.parse(raw);
+      const updated = list.map((u) => {
+        if (u.id === userId || u.email?.toLowerCase() === userEmail.toLowerCase()) {
+          return { ...u, password: newPassword };
+        }
+        return u;
+      });
+      localStorage.setItem('palle_user_registry', JSON.stringify(updated));
+    }
+
+    return { success: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Failed to reset password';
+    return { success: false, error: msg };
+  }
+}
+
+export async function adminDeleteComplaint(
+  complaintId: number
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // 1. Delete associated status updates
+    try {
+      await supabase.from('status_updates').delete().eq('complaint_id', complaintId);
+    } catch {}
+
+    // 2. Delete complaint
+    const { error } = await supabase.from('complaints').delete().eq('id', complaintId);
+    if (error) {
+      console.warn('Supabase delete complaint error:', error);
+    }
+
+    return { success: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Failed to delete report';
+    return { success: false, error: msg };
+  }
 }

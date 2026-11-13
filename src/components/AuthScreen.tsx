@@ -13,10 +13,14 @@ import {
   Eye,
   EyeOff,
   UserCheck,
+  Clock,
+  KeyRound,
+  CheckCircle2,
 } from 'lucide-react';
 import {
   supabase,
   registerAdminApprovalRequest,
+  checkIfFirstAdmin,
   type UserProfile,
   type UserRole,
   type UserGender,
@@ -49,6 +53,14 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
   const [busy, setBusy] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Forgot Password Modal
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotNewPassword, setForgotNewPassword] = useState('');
+  const [forgotSuccess, setForgotSuccess] = useState<string | null>(null);
+  const [forgotError, setForgotError] = useState<string | null>(null);
+  const [forgotLoading, setForgotLoading] = useState(false);
 
   const cleanPhone = (val: string) => val.replace(/\D/g, '').slice(0, 10);
 
@@ -103,6 +115,13 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
     const localMatch = registry.find(
       (u: any) => u.email?.toLowerCase() === email && u.password === password
     );
+
+    // If account was blocked by Admin, reject immediately
+    if (localMatch?.blocked) {
+      setBusy(false);
+      setError('Your resident account has been suspended by the Village Admin. Please contact Gram Panchayat office.');
+      return;
+    }
 
     try {
       // 2. Attempt Supabase Auth
@@ -248,14 +267,22 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
     let isPendingAdmin = false;
 
     if (selectedRole === 'admin') {
-      actualRole = 'citizen';
-      isPendingAdmin = true;
-      registerAdminApprovalRequest({
-        user_id: resolvedId,
-        display_name: trimmedName,
-        phone: rawPhone,
-        email,
-      });
+      const isFirst = await checkIfFirstAdmin();
+      if (isFirst) {
+        // First Admin: highest level of privileges directly without approval!
+        actualRole = 'admin';
+        isPendingAdmin = false;
+      } else {
+        // Subsequent Admin: requires approval of the First Admin
+        actualRole = 'citizen';
+        isPendingAdmin = true;
+        registerAdminApprovalRequest({
+          user_id: resolvedId,
+          display_name: trimmedName,
+          phone: rawPhone,
+          email,
+        });
+      }
     }
 
     const userProfile: UserProfile = {
@@ -312,6 +339,53 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
     // Immediately log the user in!
     setBusy(false);
     onAuthenticated(userProfile);
+  };
+
+  // -------------------------------------------------------------
+  // FORGOT PASSWORD HANDLER
+  // -------------------------------------------------------------
+  const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setForgotError(null);
+    setForgotSuccess(null);
+
+    const email = forgotEmail.trim().toLowerCase();
+    if (!email) {
+      setForgotError('Please enter your registered email address.');
+      return;
+    }
+    if (forgotNewPassword.length < 6) {
+      setForgotError('New password must be at least 6 characters long.');
+      return;
+    }
+
+    setForgotLoading(true);
+
+    try {
+      // 1. Update in local registry
+      const registry = getLocalRegistry();
+      const idx = registry.findIndex((u: any) => u.email?.toLowerCase() === email);
+      if (idx >= 0) {
+        registry[idx].password = forgotNewPassword;
+        localStorage.setItem('palle_user_registry', JSON.stringify(registry));
+      }
+
+      // 2. Also send reset email in the background if configured
+      try {
+        await supabase.auth.resetPasswordForEmail(email);
+      } catch {}
+
+      setForgotLoading(false);
+      setForgotSuccess('Password updated successfully! You can now log in.');
+      setLoginEmail(email);
+      setLoginPassword(forgotNewPassword);
+      setTimeout(() => {
+        setShowForgotModal(false);
+      }, 2000);
+    } catch {
+      setForgotLoading(false);
+      setForgotError('Could not reset password. Please try again.');
+    }
   };
 
   // -------------------------------------------------------------
@@ -412,10 +486,22 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
         <section className="rounded-3xl border border-slate-200/80 bg-white/95 p-6 shadow-xl shadow-slate-900/5 backdrop-blur-sm">
           {/* Status Messages */}
           {error && (
-            <div className="mb-4 flex items-start gap-2.5 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 animate-shake">
-              <AlertCircle className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
-              <div className="leading-relaxed font-medium">{error}</div>
-            </div>
+            error.toLowerCase().includes('rate limit') || error.toLowerCase().includes('too many') ? (
+              <div className="mb-4 rounded-2xl border border-amber-300 bg-amber-50 p-3.5 text-xs text-amber-950 shadow-sm animate-shake">
+                <div className="flex items-center gap-2 font-bold text-amber-900">
+                  <Clock className="h-4 w-4 text-amber-700" />
+                  <span>Request Rate Limit Reached</span>
+                </div>
+                <p className="mt-1 text-amber-800 leading-relaxed font-medium">
+                  Too many requests have been sent in a short time. Please wait 2-3 minutes before attempting again.
+                </p>
+              </div>
+            ) : (
+              <div className="mb-4 flex items-start gap-2.5 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 animate-shake">
+                <AlertCircle className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
+                <div className="leading-relaxed font-medium">{error}</div>
+              </div>
+            )
           )}
 
           {/* -------------------- TAB 1: SIGN IN -------------------- */}
@@ -461,6 +547,21 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                     {showLoginPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForgotEmail(loginEmail);
+                    setForgotSuccess(null);
+                    setForgotError(null);
+                    setShowForgotModal(true);
+                  }}
+                  className="text-xs font-semibold text-emerald-800 hover:underline"
+                >
+                  Forgot Password?
+                </button>
               </div>
 
               <button
@@ -734,6 +835,103 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
           </p>
         </div>
       </div>
+
+      {/* ======================================================== */}
+      {/* FORGOT PASSWORD MODAL                                    */}
+      {/* ======================================================== */}
+      {showForgotModal && (
+        <div
+          onClick={() => setShowForgotModal(false)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs animate-fade-in"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl animate-scale-up space-y-4"
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-100 text-emerald-800 font-black">
+                  <KeyRound className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Reset Password</h3>
+                  <p className="text-[10px] text-slate-500">Quick resident account recovery</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowForgotModal(false)}
+                className="rounded-full p-1 text-slate-400 hover:bg-slate-100"
+              >
+                ✕
+              </button>
+            </div>
+
+            {forgotSuccess && (
+              <div className="flex items-center gap-2 rounded-2xl bg-emerald-50 px-3.5 py-2.5 text-xs font-semibold text-emerald-800 border border-emerald-200">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                <span>{forgotSuccess}</span>
+              </div>
+            )}
+
+            {forgotError && (
+              <div className="flex items-center gap-2 rounded-2xl bg-rose-50 px-3.5 py-2.5 text-xs font-semibold text-rose-800 border border-rose-200">
+                <AlertCircle className="h-4 w-4 text-rose-600 shrink-0" />
+                <span>{forgotError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleForgotPasswordSubmit} className="space-y-3">
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-700">
+                  Your Registered Email
+                </label>
+                <input
+                  type="email"
+                  value={forgotEmail}
+                  onChange={(e) => setForgotEmail(e.target.value)}
+                  placeholder="name@example.com"
+                  className="w-full rounded-2xl border border-slate-300 p-2.5 text-xs text-slate-900 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-700">
+                  Enter New Password
+                </label>
+                <input
+                  type="password"
+                  value={forgotNewPassword}
+                  onChange={(e) => setForgotNewPassword(e.target.value)}
+                  placeholder="At least 6 characters"
+                  className="w-full rounded-2xl border border-slate-300 p-2.5 text-xs text-slate-900 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
+                  required
+                  minLength={6}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowForgotModal(false)}
+                  className="rounded-2xl border border-slate-200 bg-slate-50 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={forgotLoading || !forgotEmail || forgotNewPassword.length < 6}
+                  className="inline-flex items-center justify-center gap-1 rounded-2xl bg-emerald-600 py-2.5 text-xs font-bold text-white shadow-md shadow-emerald-600/30 hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  {forgotLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                  <span>Reset Password</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

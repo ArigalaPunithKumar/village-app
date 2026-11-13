@@ -103,7 +103,7 @@ export default function ReportForm({ onSubmitted }: ReportFormProps) {
     loadUser();
   }, []);
 
-  // Accurate GPS Detection for Tandlam Panchayat (no wrong external towns)
+  // Accurate GPS Detection - Locates their actual real location
   const handleDetectLocation = () => {
     if (!navigator.geolocation) {
       setGpsStatus('GPS is not supported on this device.');
@@ -111,22 +111,47 @@ export default function ReportForm({ onSubmitted }: ReportFormProps) {
     }
 
     setGpsLoading(true);
-    setGpsStatus('Detecting your GPS coordinates…');
+    setGpsStatus('Detecting your GPS coordinates & address…');
 
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
+      async (pos) => {
         const { latitude, longitude } = pos.coords;
+        let resolvedLocation = `GPS (${latitude.toFixed(5)}, ${longitude.toFixed(5)})`;
+
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 6000);
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`,
+            { signal: controller.signal, headers: { 'Accept-Language': 'en' } }
+          );
+          clearTimeout(timer);
+
+          if (res.ok) {
+            const data = await res.json();
+            const addr = data.address || {};
+            const street = addr.road || addr.street || addr.suburb || addr.neighbourhood || addr.residential || '';
+            const locality = addr.village || addr.town || addr.city || addr.county || '';
+            const district = addr.state_district || addr.county || '';
+            const parts = [street, locality, district].filter(Boolean);
+            if (parts.length > 0) {
+              resolvedLocation = `${parts.join(', ')} (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`;
+            }
+          }
+        } catch (err) {
+          console.warn('Reverse geocoding error:', err);
+        }
+
         setGpsLoading(false);
-        const resolved = `Tandlam Panchayat (GPS: ${latitude.toFixed(4)}, ${longitude.toFixed(4)})`;
-        setLocation(resolved);
-        setGpsStatus(`📍 Coordinates captured: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+        setLocation(resolvedLocation);
+        setGpsStatus(`📍 ${resolvedLocation}`);
       },
       (geoErr) => {
         setGpsLoading(false);
-        setGpsStatus('GPS signal unavailable. Please select your area below.');
+        setGpsStatus('GPS unavailable. Please check device location permissions.');
         console.warn('Geolocation notice:', geoErr);
       },
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   };
 

@@ -215,6 +215,7 @@ export default function App() {
               complaintId={screen.complaintId}
               onBack={() => setScreen({ view: 'complaints' })}
               canUpdate={isStaff}
+              isAdmin={role === 'admin'}
               updatedBy={userProfile?.display_name || 'Panchayat Team'}
             />
           )}

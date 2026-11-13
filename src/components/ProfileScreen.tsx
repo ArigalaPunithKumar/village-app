@@ -20,6 +20,10 @@ import {
   Clock,
   ShieldCheck,
   X,
+  Pencil,
+  Ban,
+  RotateCcw,
+  Users,
 } from 'lucide-react';
 import {
   supabase,
@@ -27,6 +31,9 @@ import {
   saveProfileDetails,
   getPendingAdminRequests,
   resolveAdminRequest,
+  fetchAllUsersForAdmin,
+  adminToggleBlockUser,
+  adminResetUserPassword,
   type UserProfile,
   type UserRole,
   type AdminApprovalRequest,
@@ -43,6 +50,7 @@ export default function ProfileScreen({ profile: initialProfile, onSignOut, onRo
   const [loading, setLoading] = useState(!initialProfile);
 
   // Edit details state
+  const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState(initialProfile?.display_name || '');
   const [phone, setPhone] = useState(initialProfile?.phone || '');
   const [aadhaar, setAadhaar] = useState(initialProfile?.aadhaar || '');
@@ -64,6 +72,15 @@ export default function ProfileScreen({ profile: initialProfile, onSignOut, onRo
   // Admin approval queue (only visible to admins)
   const [adminRequests, setAdminRequests] = useState<AdminApprovalRequest[]>([]);
   const [actionReqId, setActionReqId] = useState<string | null>(null);
+
+  // Admin User Directory & Controls
+  const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [userStatusBusy, setUserStatusBusy] = useState<string | null>(null);
+  const [resetModalUser, setResetModalUser] = useState<UserProfile | null>(null);
+  const [adminNewPassword, setAdminNewPassword] = useState('');
+  const [resettingPassword, setResettingPassword] = useState(false);
+  const [adminActionMsg, setAdminActionMsg] = useState<string | null>(null);
 
   // Logout confirmation modal state
   const [showLogoutModal, setShowLogoutModal] = useState(false);
@@ -87,12 +104,23 @@ export default function ProfileScreen({ profile: initialProfile, onSignOut, onRo
 
         if (p.role === 'admin') {
           setAdminRequests(getPendingAdminRequests());
+          loadAdminUsers();
         }
       }
       setLoading(false);
     }
     loadData();
   }, []);
+
+  const loadAdminUsers = async () => {
+    setLoadingUsers(true);
+    try {
+      const users = await fetchAllUsersForAdmin();
+      setAllUsers(users);
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
 
   const handleUpdateDetails = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -137,6 +165,7 @@ export default function ProfileScreen({ profile: initialProfile, onSignOut, onRo
       localStorage.setItem('palle_current_user', JSON.stringify(updated));
       localStorage.setItem(`palle_profile_${profile.id}`, JSON.stringify(updated));
 
+      setIsEditing(false);
       setDetailsSuccess('Profile details saved successfully!');
       setTimeout(() => setDetailsSuccess(null), 4000);
     } else {
@@ -187,8 +216,43 @@ export default function ProfileScreen({ profile: initialProfile, onSignOut, onRo
     try {
       const updated = resolveAdminRequest(requestId, approve);
       setAdminRequests(updated);
+      loadAdminUsers();
+      setAdminActionMsg(approve ? 'Admin access approved!' : 'Admin request rejected.');
+      setTimeout(() => setAdminActionMsg(null), 4000);
     } finally {
       setActionReqId(null);
+    }
+  };
+
+  // Admin: Block / Unblock User
+  const handleToggleBlock = async (targetUser: UserProfile) => {
+    setUserStatusBusy(targetUser.id);
+    const newStatus = !targetUser.blocked;
+    const res = await adminToggleBlockUser(targetUser.id, targetUser.email, newStatus);
+    setUserStatusBusy(null);
+
+    if (res.success) {
+      setAllUsers((prev) =>
+        prev.map((u) => (u.id === targetUser.id ? { ...u, blocked: newStatus } : u))
+      );
+      setAdminActionMsg(`User ${targetUser.display_name} is now ${newStatus ? 'Blocked' : 'Active'}.`);
+      setTimeout(() => setAdminActionMsg(null), 4000);
+    }
+  };
+
+  // Admin: Reset User or Sarpanch Password
+  const handleAdminResetPassword = async () => {
+    if (!resetModalUser || !adminNewPassword.trim()) return;
+    setResettingPassword(true);
+
+    const res = await adminResetUserPassword(resetModalUser.id, resetModalUser.email, adminNewPassword.trim());
+    setResettingPassword(false);
+
+    if (res.success) {
+      setAdminActionMsg(`Password for ${resetModalUser.display_name} has been reset to "${adminNewPassword}".`);
+      setResetModalUser(null);
+      setAdminNewPassword('');
+      setTimeout(() => setAdminActionMsg(null), 5000);
     }
   };
 
@@ -257,20 +321,24 @@ export default function ProfileScreen({ profile: initialProfile, onSignOut, onRo
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Shield className="h-4 w-4 text-amber-700" />
-              <h2 className="text-xs font-bold text-amber-950">Admin Interface Switcher</h2>
+              <h2 className="text-xs font-bold text-amber-950">Role Switcher (Admin Power)</h2>
             </div>
-            <span className="rounded-full bg-amber-200 px-2 py-0.5 text-[9px] font-bold text-amber-950">
-              Admin Only
+            <span className="rounded-full bg-amber-200 px-2 py-0.5 text-[9px] font-bold text-amber-900">
+              Active: {role.toUpperCase()}
             </span>
           </div>
+
+          <p className="mt-1 text-[11px] text-amber-800">
+            Preview the application under different village roles instantly:
+          </p>
 
           <div className="mt-3 grid grid-cols-3 gap-2">
             <button
               type="button"
               onClick={() => handleRoleToggle('citizen')}
-              className={`flex flex-col items-center gap-1 rounded-xl border p-2 text-center transition ${
+              className={`flex items-center justify-center gap-1.5 rounded-xl border py-2 font-bold transition active:scale-95 ${
                 role === 'citizen'
-                  ? 'border-emerald-600 bg-emerald-100 font-bold text-emerald-950 ring-1 ring-emerald-500'
+                  ? 'border-emerald-600 bg-emerald-600 text-white shadow-xs'
                   : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
               }`}
             >
@@ -281,22 +349,22 @@ export default function ProfileScreen({ profile: initialProfile, onSignOut, onRo
             <button
               type="button"
               onClick={() => handleRoleToggle('sarpanch')}
-              className={`flex flex-col items-center gap-1 rounded-xl border p-2 text-center transition ${
+              className={`flex items-center justify-center gap-1.5 rounded-xl border py-2 font-bold transition active:scale-95 ${
                 role === 'sarpanch'
-                  ? 'border-blue-600 bg-blue-100 font-bold text-blue-950 ring-1 ring-blue-500'
+                  ? 'border-emerald-700 bg-emerald-700 text-white shadow-xs'
                   : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
               }`}
             >
-              <ShieldCheck className="h-3.5 w-3.5" />
+              <Building2 className="h-3.5 w-3.5" />
               <span className="text-[10px]">Sarpanch</span>
             </button>
 
             <button
               type="button"
               onClick={() => handleRoleToggle('admin')}
-              className={`flex flex-col items-center gap-1 rounded-xl border p-2 text-center transition ${
+              className={`flex items-center justify-center gap-1.5 rounded-xl border py-2 font-bold transition active:scale-95 ${
                 role === 'admin'
-                  ? 'border-amber-600 bg-amber-100 font-bold text-amber-950 ring-1 ring-amber-500'
+                  ? 'border-amber-500 bg-amber-500 text-amber-950 shadow-xs'
                   : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
               }`}
             >
@@ -305,6 +373,14 @@ export default function ProfileScreen({ profile: initialProfile, onSignOut, onRo
             </button>
           </div>
         </section>
+      )}
+
+      {/* ADMIN ONLY: Global Action Alert */}
+      {adminActionMsg && (
+        <div className="flex items-center gap-2 rounded-2xl bg-emerald-50 px-3.5 py-2.5 text-xs font-semibold text-emerald-800 border border-emerald-200 animate-slide-up">
+          <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+          <span>{adminActionMsg}</span>
+        </div>
       )}
 
       {/* ADMIN ONLY: Pending Admin Approvals */}
@@ -364,13 +440,136 @@ export default function ProfileScreen({ profile: initialProfile, onSignOut, onRo
         </section>
       )}
 
-      {/* Edit Profile Details & Aadhaar */}
+      {/* ADMIN ONLY: All Users Management Directory */}
+      {isAdmin && (
+        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Users className="h-4 w-4 text-emerald-600" />
+              <h2 className="text-sm font-bold text-slate-900">User Management & Controls</h2>
+            </div>
+            <button
+              type="button"
+              onClick={loadAdminUsers}
+              className="text-[10px] font-bold text-emerald-700 hover:underline flex items-center gap-0.5"
+            >
+              <RotateCcw className="h-3 w-3" />
+              <span>Refresh</span>
+            </button>
+          </div>
+
+          <p className="text-xs text-slate-500">
+            As Admin, you can view all registered citizens & Sarpanch, block/unblock accounts, and reset passwords.
+          </p>
+
+          {loadingUsers ? (
+            <div className="py-6 text-center">
+              <Loader2 className="mx-auto h-5 w-5 animate-spin text-emerald-600" />
+              <span className="text-[11px] text-slate-400 mt-1 block">Loading users…</span>
+            </div>
+          ) : allUsers.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-slate-200 p-4 text-center text-xs text-slate-500">
+              No registered users found.
+            </div>
+          ) : (
+            <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
+              {allUsers.map((u) => {
+                const isSelf = u.id === profile?.id;
+                return (
+                  <div
+                    key={u.id}
+                    className={`rounded-2xl border p-3 space-y-2 transition ${
+                      u.blocked
+                        ? 'border-rose-200 bg-rose-50/40'
+                        : 'border-slate-100 bg-slate-50/70 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="text-xs font-bold text-slate-900">{u.display_name}</p>
+                          <span
+                            className={`rounded-md px-1.5 py-0.5 text-[9px] font-black uppercase ${
+                              u.role === 'admin'
+                                ? 'bg-amber-100 text-amber-900'
+                                : u.role === 'sarpanch'
+                                ? 'bg-emerald-100 text-emerald-900'
+                                : 'bg-slate-200 text-slate-700'
+                            }`}
+                          >
+                            {u.role}
+                          </span>
+                          {u.blocked && (
+                            <span className="rounded-md bg-rose-500 px-1.5 py-0.5 text-[9px] font-black uppercase text-white">
+                              Blocked
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-0.5">
+                          {u.email} {u.phone ? `• +91 ${u.phone}` : ''}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Admin Action buttons for this user */}
+                    {!isSelf && (
+                      <div className="flex items-center gap-2 pt-1 border-t border-slate-200/60">
+                        {/* Block/Unblock toggle */}
+                        <button
+                          type="button"
+                          disabled={userStatusBusy === u.id}
+                          onClick={() => handleToggleBlock(u)}
+                          className={`inline-flex items-center gap-1 rounded-xl px-2.5 py-1 text-[11px] font-bold transition active:scale-95 ${
+                            u.blocked
+                              ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                              : 'bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200'
+                          }`}
+                        >
+                          <Ban className="h-3 w-3" />
+                          <span>{u.blocked ? 'Unblock User' : 'Block User'}</span>
+                        </button>
+
+                        {/* Reset Password */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setResetModalUser(u);
+                            setAdminNewPassword('Palle@123');
+                          }}
+                          className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-50 active:scale-95"
+                        >
+                          <KeyRound className="h-3 w-3 text-slate-500" />
+                          <span>Reset Password</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Edit Profile Details & Aadhaar (Editable ONLY after clicking Edit button) */}
       <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <User className="h-4 w-4 text-emerald-600" />
             <h2 className="text-sm font-bold text-slate-900">Personal Details</h2>
           </div>
+
+          {/* EDIT BUTTON TOGGLE */}
+          {!isEditing && (
+            <button
+              type="button"
+              onClick={() => setIsEditing(true)}
+              className="inline-flex items-center gap-1 rounded-xl bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-100 border border-emerald-200 transition active:scale-95"
+            >
+              <Pencil className="h-3 w-3" />
+              <span>Edit Profile</span>
+            </button>
+          )}
         </div>
 
         {detailsSuccess && (
@@ -396,9 +595,14 @@ export default function ProfileScreen({ profile: initialProfile, onSignOut, onRo
               <input
                 type="text"
                 value={name}
+                disabled={!isEditing}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Your Full Name"
-                className="w-full rounded-2xl border border-slate-200 py-2.5 pl-10 pr-3.5 text-sm font-medium text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+                className={`w-full rounded-2xl border py-2.5 pl-10 pr-3.5 text-sm font-medium outline-none transition ${
+                  isEditing
+                    ? 'border-emerald-500 bg-white text-slate-900 ring-2 ring-emerald-100'
+                    : 'border-slate-200 bg-slate-50 text-slate-600 cursor-not-allowed'
+                }`}
                 required
               />
             </div>
@@ -417,9 +621,14 @@ export default function ProfileScreen({ profile: initialProfile, onSignOut, onRo
                   type="tel"
                   maxLength={10}
                   value={phone}
+                  disabled={!isEditing}
                   onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
                   placeholder="10-digit mobile number"
-                  className="w-full rounded-2xl border border-slate-200 py-2.5 pl-10 pr-3.5 text-sm font-medium text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+                  className={`w-full rounded-2xl border py-2.5 pl-10 pr-3.5 text-sm font-medium outline-none transition ${
+                    isEditing
+                      ? 'border-emerald-500 bg-white text-slate-900 ring-2 ring-emerald-100'
+                      : 'border-slate-200 bg-slate-50 text-slate-600 cursor-not-allowed'
+                  }`}
                   required
                 />
               </div>
@@ -437,17 +646,22 @@ export default function ProfileScreen({ profile: initialProfile, onSignOut, onRo
                 type="text"
                 maxLength={14}
                 value={aadhaar}
+                disabled={!isEditing}
                 onChange={(e) => {
                   const raw = e.target.value.replace(/\D/g, '').slice(0, 12);
                   const formatted = raw.replace(/(\d{4})(?=\d)/g, '$1 ');
                   setAadhaar(formatted);
                 }}
                 placeholder="XXXX XXXX XXXX"
-                className="w-full rounded-2xl border border-slate-200 py-2.5 pl-10 pr-3.5 text-sm font-semibold tracking-wider text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+                className={`w-full rounded-2xl border py-2.5 pl-10 pr-3.5 text-sm font-semibold tracking-wider outline-none transition ${
+                  isEditing
+                    ? 'border-emerald-500 bg-white text-slate-900 ring-2 ring-emerald-100'
+                    : 'border-slate-200 bg-slate-50 text-slate-600 cursor-not-allowed'
+                }`}
               />
             </div>
             <p className="mt-1 text-[10px] text-slate-400">
-              Used for village welfare schemes and resident verification.
+              Used for resident record verification in Tandlam Panchayat.
             </p>
           </div>
 
@@ -465,14 +679,32 @@ export default function ProfileScreen({ profile: initialProfile, onSignOut, onRo
             </div>
           </div>
 
-          <button
-            type="submit"
-            disabled={savingDetails || !name.trim() || phone.length !== 10}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-700 py-3 text-sm font-bold text-white shadow-md transition hover:bg-emerald-800 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {savingDetails ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            {savingDetails ? 'Saving…' : 'Save Details'}
-          </button>
+          {/* SAVE & CANCEL BUTTONS (Visible ONLY during editing) */}
+          {isEditing && (
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setName(profile?.display_name || '');
+                  setPhone(profile?.phone || '');
+                  setAadhaar(profile?.aadhaar || '');
+                  setIsEditing(false);
+                  setDetailsError(null);
+                }}
+                className="rounded-2xl border border-slate-200 bg-slate-50 py-3 text-xs font-bold text-slate-700 hover:bg-slate-100 transition active:scale-95"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={savingDetails || !name.trim() || phone.length !== 10}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-700 py-3 text-xs font-bold text-white shadow-md transition hover:bg-emerald-800 active:scale-95 disabled:opacity-50"
+              >
+                {savingDetails ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                <span>Save Changes</span>
+              </button>
+            </div>
+          )}
         </form>
       </section>
 
@@ -523,13 +755,13 @@ export default function ProfileScreen({ profile: initialProfile, onSignOut, onRo
 
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-700">
-              Confirm Password <span className="text-rose-500">*</span>
+              Confirm New Password <span className="text-rose-500">*</span>
             </label>
             <input
               type={showPassword ? 'text' : 'password'}
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="Re-enter password"
+              placeholder="Re-enter new password"
               className="w-full rounded-2xl border border-slate-200 py-2.5 px-3.5 text-sm font-medium text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
               required
             />
@@ -537,7 +769,7 @@ export default function ProfileScreen({ profile: initialProfile, onSignOut, onRo
 
           <button
             type="submit"
-            disabled={updatingPassword || newPassword.length < 6 || !confirmPassword}
+            disabled={updatingPassword || newPassword.length < 6 || newPassword !== confirmPassword}
             className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 py-3 text-sm font-bold text-white shadow-md transition hover:bg-slate-800 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {updatingPassword ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
@@ -546,50 +778,85 @@ export default function ProfileScreen({ profile: initialProfile, onSignOut, onRo
         </form>
       </section>
 
-      {/* Logout with Confirmation Modal */}
-      <section className="pt-2">
-        <button
-          type="button"
-          onClick={() => setShowLogoutModal(true)}
-          className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 py-3 text-sm font-bold text-rose-700 transition hover:bg-rose-100 active:scale-[0.98]"
-        >
-          <LogOut className="h-4 w-4" />
-          Logout
-        </button>
+      {/* Logout Card */}
+      <section className="rounded-3xl border border-rose-100 bg-rose-50/50 p-5 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-bold text-rose-950">Log Out of App</h2>
+            <p className="mt-0.5 text-xs text-rose-800/80">Sign out of your resident account</p>
+          </div>
+          <button
+            type="button"
+            onClick={onSignOut}
+            className="inline-flex items-center gap-1.5 rounded-2xl bg-rose-600 px-4 py-2.5 text-xs font-black text-white shadow-md shadow-rose-600/30 transition hover:bg-rose-700 active:scale-95"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            <span>Logout</span>
+          </button>
+        </div>
       </section>
 
-      {/* Logout Confirmation Modal */}
-      {showLogoutModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs animate-fade-in">
-          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl animate-scale-up space-y-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-600 mx-auto">
-              <LogOut className="h-6 w-6" />
+      {/* ADMIN RESET PASSWORD MODAL */}
+      {resetModalUser && (
+        <div
+          onClick={() => setResetModalUser(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs animate-fade-in"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl animate-scale-up space-y-4"
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-100 text-amber-800 font-black">
+                  <KeyRound className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Admin Reset Password</h3>
+                  <p className="text-[10px] text-slate-500">For {resetModalUser.display_name}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setResetModalUser(null)}
+                className="rounded-full p-1 text-slate-400 hover:bg-slate-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
 
-            <div className="text-center">
-              <h3 className="text-base font-black text-slate-900">Confirm Logout</h3>
-              <p className="mt-1 text-xs text-slate-500 leading-relaxed">
-                Are you sure you want to log out of your account? You will need your email and password to log in again.
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-700">
+                New Password for User:
+              </label>
+              <input
+                type="text"
+                value={adminNewPassword}
+                onChange={(e) => setAdminNewPassword(e.target.value)}
+                placeholder="Enter new password (min 6 characters)"
+                className="w-full rounded-2xl border border-slate-200 p-3 text-xs font-mono font-bold text-slate-900 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100"
+              />
+              <p className="mt-1 text-[10px] text-slate-400">
+                Default suggested: Palle@123. The user can log in with this new password immediately.
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 pt-2">
+            <div className="grid grid-cols-2 gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => setShowLogoutModal(false)}
-                className="rounded-2xl border border-slate-200 bg-slate-50 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-100 transition"
+                onClick={() => setResetModalUser(null)}
+                className="rounded-xl border border-slate-200 bg-slate-50 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-100"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setShowLogoutModal(false);
-                  onSignOut();
-                }}
-                className="rounded-2xl bg-rose-600 py-2.5 text-xs font-bold text-white shadow-md shadow-rose-600/30 hover:bg-rose-700 transition"
+                disabled={resettingPassword || adminNewPassword.length < 6}
+                onClick={handleAdminResetPassword}
+                className="inline-flex items-center justify-center gap-1 rounded-xl bg-amber-500 py-2.5 text-xs font-bold text-amber-950 shadow-md shadow-amber-500/30 hover:bg-amber-600 disabled:opacity-50"
               >
-                Logout
+                {resettingPassword ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                <span>Set Password</span>
               </button>
             </div>
           </div>
