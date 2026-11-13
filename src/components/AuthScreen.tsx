@@ -32,7 +32,7 @@ type AuthMode = 'signin' | 'signup';
 export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
   const [authMode, setAuthMode] = useState<AuthMode>('signin');
 
-  // Login Fields
+  // Sign In Fields
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [showLoginPassword, setShowLoginPassword] = useState(false);
@@ -46,7 +46,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
   const [gender, setGender] = useState<UserGender>('male');
   const [selectedRole, setSelectedRole] = useState<UserRole>('citizen');
 
-  // UI State
+  // Status & Feedback
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -65,7 +65,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
     const password = loginPassword;
 
     if (!email || !password) {
-      setError('దయచేసి ఈమెయిల్ మరియు పాస్‌వర్డ్ నమోదు చేయండి (Please enter email & password).');
+      setError('Please enter both your email address and password.');
       return;
     }
 
@@ -81,7 +81,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
         setBusy(false);
         const errMsg = signInError.message.toLowerCase();
         if (errMsg.includes('invalid login credentials') || errMsg.includes('invalid credentials')) {
-          setError('ఈమెయిల్ లేదా పాస్‌వర్డ్ సరైనది కాదు. దయచేసి సరిచూసుకోండి (Invalid email or password).');
+          setError('Invalid email or password. Please verify and try again.');
         } else if (errMsg.includes('email not confirmed')) {
           // Check local stored session for this email
           const stored = localStorage.getItem('palle_current_user');
@@ -92,7 +92,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
               return;
             }
           }
-          setError('ఈమెయిల్ ధృవీకరణ పెండింగ్‌లో ఉంది. దయచేసి మీ ఈమెయిల్ ఇన్‌బాక్స్ చూడండి లేదా కొత్త ఖాతా సృష్టించండి.');
+          setError('Email confirmation is pending. Please check your inbox or create a new account.');
         } else {
           setError(signInError.message);
         }
@@ -137,11 +137,11 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
         onAuthenticated(profile);
       } else {
         setBusy(false);
-        setError('లాగిన్ విఫలమైంది. మళ్ళీ ప్రయత్నించండి.');
+        setError('Sign in failed. Please try again.');
       }
     } catch (err: unknown) {
       setBusy(false);
-      const msg = err instanceof Error ? err.message : 'లాగిన్ లో సమస్య ఏర్పడింది.';
+      const msg = err instanceof Error ? err.message : 'An error occurred during sign in.';
       setError(msg);
     }
   };
@@ -161,20 +161,20 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
 
     // Validation
     if (trimmedName.length < 2) {
-      setError('దయచేసి మీ పూర్తి పేరు రాయండి (Please enter your full name).');
+      setError('Please enter your full name.');
       return;
     }
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      setError('దయచేసి సరైన ఈమెయిల్ చిరునామా నమోదు చేయండి (Enter valid email address).');
+      setError('Please enter a valid email address.');
       return;
     }
     if (password.length < 6) {
-      setError('పాస్‌వర్డ్ కనీసం 6 అక్షరాలు ఉండాలి (Password must be at least 6 characters).');
+      setError('Password must be at least 6 characters long.');
       return;
     }
     if (rawPhone.length !== 10) {
-      setError('దయచేసి 10 అంకెల మొబైల్ నంబర్ రాయండి (Enter valid 10-digit mobile number).');
+      setError('Please enter a valid 10-digit mobile number.');
       return;
     }
 
@@ -200,7 +200,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
         setBusy(false);
         const errMsg = signUpError.message.toLowerCase();
         if (errMsg.includes('already registered') || errMsg.includes('unique constraint') || errMsg.includes('user already exists')) {
-          setError('ఈ ఈమెయిల్ తో ఇప్పటికే ఖాతా ఉంది. దయచేసి పైన "లాగిన్" ఎంచుకుని లాగిన్ అవ్వండి (User already registered. Please Sign In).');
+          setError('An account with this email already exists. Please switch to Sign In.');
         } else {
           setError(signUpError.message);
         }
@@ -256,7 +256,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
       onAuthenticated(userProfile);
     } catch (err: unknown) {
       setBusy(false);
-      const msg = err instanceof Error ? err.message : 'ఖాతా నమోదులో సమస్య ఏర్పడింది.';
+      const msg = err instanceof Error ? err.message : 'An error occurred during registration.';
       setError(msg);
     }
   };
@@ -269,7 +269,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
     setError(null);
     const demoUser: UserProfile = {
       id: 'citizen_demo_user',
-      display_name: 'తండ్లం గ్రామ పౌరుడు (Citizen)',
+      display_name: 'Resident Citizen',
       phone: '9848012345',
       email: 'citizen_demo@pallenestam.org',
       gender: 'male',
@@ -294,13 +294,13 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
           </div>
 
           <h1 className="mt-3 text-2xl font-black tracking-tight text-slate-900 font-serif">
-            పల్లె నేస్తం
+            Palle Nestham
           </h1>
           <p className="text-xs font-semibold uppercase tracking-wider text-emerald-800">
-            Palle Nestham • Tandlam Panchayat
+            Tandlam Grama Panchayat • Tirupati District
           </p>
           <p className="mt-0.5 text-[11px] text-slate-500">
-            తండ్లం గ్రామ పంచాయతీ • తిరుపతి జిల్లా
+            Citizen Grievance & Public Services Portal
           </p>
         </div>
 
@@ -320,7 +320,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
             }`}
           >
             <UserCheck className="h-4 w-4" />
-            <span>లాగిన్ (Sign In)</span>
+            <span>Sign In</span>
           </button>
           <button
             type="button"
@@ -336,7 +336,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
             }`}
           >
             <User className="h-4 w-4" />
-            <span>కొత్త ఖాతా (Register)</span>
+            <span>Register</span>
           </button>
         </div>
 
@@ -362,7 +362,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
             <form onSubmit={handleSignIn} className="space-y-4">
               <div>
                 <label className="mb-1.5 block text-xs font-bold text-slate-700">
-                  ఈమెయిల్ చిరునామా (Email Address)
+                  Email Address
                 </label>
                 <div className="relative">
                   <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -380,7 +380,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
 
               <div>
                 <label className="mb-1.5 block text-xs font-bold text-slate-700">
-                  పాస్‌వర్డ్ (Password)
+                  Password
                 </label>
                 <div className="relative">
                   <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -408,7 +408,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                 className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 py-3.5 text-sm font-bold text-white shadow-lg shadow-emerald-700/20 transition-all hover:opacity-95 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <ArrowRight className="h-5 w-5" />}
-                {busy ? 'లాగిన్ అవుతోంది…' : 'లాగిన్ అవ్వండి (Sign In)'}
+                {busy ? 'Signing in…' : 'Sign In'}
               </button>
 
               <div className="pt-2 text-center">
@@ -420,7 +420,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                   }}
                   className="text-xs font-semibold text-emerald-800 hover:underline"
                 >
-                  కొత్త ఖాతా లేదా? <span className="font-bold underline">ఇక్కడ రిజిస్టర్ అవ్వండి (Register)</span>
+                  Don't have an account? <span className="font-bold underline">Register here</span>
                 </button>
               </div>
             </form>
@@ -430,7 +430,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
               {/* Full Name */}
               <div>
                 <label className="mb-1 block text-xs font-bold text-slate-700">
-                  పూర్తి పేరు (Full Name) <span className="text-rose-500">*</span>
+                  Full Name <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative">
                   <User className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -438,7 +438,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="ఉదా: పునీత్ కుమార్"
+                    placeholder="e.g. Punith Kumar"
                     className="w-full rounded-2xl border border-slate-300 bg-white py-2.5 pl-10 pr-3.5 text-sm text-slate-900 outline-none transition focus:border-emerald-600 focus:ring-4 focus:ring-emerald-100"
                     required
                   />
@@ -448,7 +448,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
               {/* Email */}
               <div>
                 <label className="mb-1 block text-xs font-bold text-slate-700">
-                  ఈమెయిల్ (Email Address) <span className="text-rose-500">*</span>
+                  Email Address <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative">
                   <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -466,7 +466,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
               {/* Password */}
               <div>
                 <label className="mb-1 block text-xs font-bold text-slate-700">
-                  పాస్‌వర్డ్ (Password - కనీసం 6 అక్షరాలు) <span className="text-rose-500">*</span>
+                  Password (min 6 characters) <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative">
                   <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -474,7 +474,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                     type={showRegisterPassword ? 'text' : 'password'}
                     value={registerPassword}
                     onChange={(e) => setRegisterPassword(e.target.value)}
-                    placeholder="కనీసం 6 అక్షరాలు"
+                    placeholder="At least 6 characters"
                     className="w-full rounded-2xl border border-slate-300 bg-white py-2.5 pl-10 pr-10 text-sm text-slate-900 outline-none transition focus:border-emerald-600 focus:ring-4 focus:ring-emerald-100"
                     required
                     minLength={6}
@@ -492,7 +492,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
               {/* Mobile Number */}
               <div>
                 <label className="mb-1 block text-xs font-bold text-slate-700">
-                  మొబైల్ నంబర్ (Mobile Number) <span className="text-rose-500">*</span>
+                  Mobile Number <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative flex items-center">
                   <div className="pointer-events-none absolute left-3.5 flex items-center gap-1 text-slate-500">
@@ -514,7 +514,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
               {/* Gender Selection */}
               <div>
                 <label className="mb-1.5 block text-xs font-bold text-slate-700">
-                  లింగం (Gender) <span className="text-rose-500">*</span>
+                  Gender <span className="text-rose-500">*</span>
                 </label>
                 <div className="grid grid-cols-3 gap-2">
                   <button
@@ -526,7 +526,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                         : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
                     }`}
                   >
-                    <span>👨 పురుషుడు (Male)</span>
+                    <span>Male</span>
                   </button>
                   <button
                     type="button"
@@ -537,7 +537,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                         : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
                     }`}
                   >
-                    <span>👩 స్త్రీ (Female)</span>
+                    <span>Female</span>
                   </button>
                   <button
                     type="button"
@@ -548,7 +548,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                         : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
                     }`}
                   >
-                    <span>⚧ ఇతరులు</span>
+                    <span>Other</span>
                   </button>
                 </div>
               </div>
@@ -556,52 +556,52 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
               {/* Role Selection */}
               <div>
                 <label className="mb-1.5 block text-xs font-bold text-slate-700">
-                  గ్రామంలో మీ పాత్ర (Role in Village)
+                  Role
                 </label>
                 <div className="grid grid-cols-3 gap-1.5">
                   {/* Citizen */}
                   <button
                     type="button"
                     onClick={() => setSelectedRole('citizen')}
-                    className={`flex flex-col items-center justify-center rounded-xl border p-2 text-center transition-all ${
+                    className={`flex flex-col items-center justify-center rounded-xl border p-2.5 text-center transition-all ${
                       selectedRole === 'citizen'
                         ? 'border-emerald-600 bg-emerald-50/90 text-emerald-950 ring-2 ring-emerald-600/20'
                         : 'border-slate-200 bg-slate-50/60 text-slate-600 hover:bg-slate-100'
                     }`}
                   >
                     <User className="h-4 w-4 text-emerald-700 mb-0.5" />
-                    <span className="text-[11px] font-bold">పౌరుడు</span>
-                    <span className="text-[9px] text-slate-500">Citizen</span>
+                    <span className="text-xs font-bold">Citizen</span>
+                    <span className="text-[10px] text-slate-500">Resident</span>
                   </button>
 
                   {/* Official */}
                   <button
                     type="button"
                     onClick={() => setSelectedRole('official')}
-                    className={`flex flex-col items-center justify-center rounded-xl border p-2 text-center transition-all ${
+                    className={`flex flex-col items-center justify-center rounded-xl border p-2.5 text-center transition-all ${
                       selectedRole === 'official'
                         ? 'border-blue-600 bg-blue-50/90 text-blue-950 ring-2 ring-blue-600/20'
                         : 'border-slate-200 bg-slate-50/60 text-slate-600 hover:bg-slate-100'
                     }`}
                   >
                     <ShieldCheck className="h-4 w-4 text-blue-700 mb-0.5" />
-                    <span className="text-[11px] font-bold">అధికారి</span>
-                    <span className="text-[9px] text-slate-500">Official</span>
+                    <span className="text-xs font-bold">Official</span>
+                    <span className="text-[10px] text-slate-500">Staff</span>
                   </button>
 
                   {/* Admin */}
                   <button
                     type="button"
                     onClick={() => setSelectedRole('admin')}
-                    className={`flex flex-col items-center justify-center rounded-xl border p-2 text-center transition-all ${
+                    className={`flex flex-col items-center justify-center rounded-xl border p-2.5 text-center transition-all ${
                       selectedRole === 'admin'
                         ? 'border-purple-600 bg-purple-50/90 text-purple-950 ring-2 ring-purple-600/20'
                         : 'border-slate-200 bg-slate-50/60 text-slate-600 hover:bg-slate-100'
                     }`}
                   >
                     <Crown className="h-4 w-4 text-purple-700 mb-0.5" />
-                    <span className="text-[11px] font-bold">అడ్మిన్</span>
-                    <span className="text-[9px] text-slate-500">Admin</span>
+                    <span className="text-xs font-bold">Admin</span>
+                    <span className="text-[10px] text-slate-500">Panchayat</span>
                   </button>
                 </div>
               </div>
@@ -613,7 +613,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                 className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 py-3.5 text-sm font-bold text-white shadow-lg shadow-emerald-700/20 transition-all hover:opacity-95 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <ArrowRight className="h-5 w-5" />}
-                {busy ? 'ఖాతా సృష్టిస్తున్నాము…' : 'ఖాతా సృష్టించండి (Register & Sign In)'}
+                {busy ? 'Creating account…' : 'Register & Sign In'}
               </button>
 
               <div className="pt-1 text-center">
@@ -625,7 +625,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                   }}
                   className="text-xs font-semibold text-emerald-800 hover:underline"
                 >
-                  ఇప్పటికే ఖాతా ఉందా? <span className="font-bold underline">లాగిన్ అవ్వండి (Sign In)</span>
+                  Already have an account? <span className="font-bold underline">Sign In</span>
                 </button>
               </div>
             </form>
@@ -641,14 +641,14 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
             className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/90 py-2.5 text-xs font-bold text-emerald-900 transition hover:bg-emerald-100 active:scale-[0.98]"
           >
             <Sparkles className="h-3.5 w-3.5 text-emerald-700" />
-            <span>⚡ త్వరిత పౌర ప్రవేశం • Instant Citizen Demo Access</span>
+            <span>⚡ Instant Citizen Demo Access</span>
           </button>
         </div>
 
         {/* Footer */}
         <div className="mt-5 text-center">
           <p className="text-[11px] text-slate-400">
-            సహాయం కావాలా? తండ్లం గ్రామ సచివాలయాన్ని సంప్రదించండి.
+            Tandlam Grama Panchayat • Tirupati District
           </p>
         </div>
       </div>
