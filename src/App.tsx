@@ -14,12 +14,12 @@ import SettingsScreen from '@/components/SettingsScreen';
 import { applyStoredPreferences } from '@/lib/preferences';
 import AuthScreen from '@/components/AuthScreen';
 import SplashScreen from '@/components/SplashScreen';
-import { supabase, fetchCurrentProfile, type UserProfile, type UserRole } from '@/lib/supabase';
+import { supabase, fetchCurrentProfile, type ComplaintStatus, type UserProfile, type UserRole } from '@/lib/supabase';
 
 type Screen =
   | { view: 'dashboard' }
   | { view: 'report' }
-  | { view: 'complaints' }
+  | { view: 'complaints'; statusFilter?: ComplaintStatus }
   | { view: 'officials' }
   | { view: 'community' }
   | { view: 'settings' }
@@ -155,6 +155,14 @@ export default function App() {
     if (tab === 'report' && role !== 'citizen') return;
     setScreen({ view: tab });
   };
+  const handleMenuNavigate = (tab: Tab, statusFilter?: ComplaintStatus) => {
+    if (tab === 'report' && role !== 'citizen') return;
+    if (tab === 'complaints' && statusFilter) {
+      setScreen({ view: 'complaints', statusFilter });
+      return;
+    }
+    handleTabChange(tab);
+  };
   const handleSelectComplaint = (id: number) => setScreen({ view: 'detail', complaintId: id });
 
   const topTitle =
@@ -162,6 +170,8 @@ export default function App() {
       ? 'Complaint Details'
       : screen.view === 'success'
       ? 'Grievance Submitted'
+      : screen.view === 'complaints' && screen.statusFilter === 'resolved'
+      ? 'Resolved Cases'
       : TAB_TITLES[activeTab] || 'Palle Nestham';
 
   const screenTransitionKey =
@@ -169,6 +179,8 @@ export default function App() {
       ? `detail-${screen.complaintId}`
       : screen.view === 'success'
       ? `success-${screen.ticketNumber}`
+      : screen.view === 'complaints'
+      ? `complaints-${screen.statusFilter || 'all'}`
       : screen.view;
 
   if (showSplash) return <SplashScreen onComplete={() => setShowSplash(false)} />;
@@ -190,7 +202,10 @@ export default function App() {
           email={userProfile?.email || session?.user?.email || ''}
           role={role}
           userName={userProfile?.display_name || ''}
+          active={activeTab}
+          activeStatusFilter={screen.view === 'complaints' ? screen.statusFilter : undefined}
           onOpenProfile={() => setScreen({ view: 'profile' })}
+          onNavigate={handleMenuNavigate}
           onSignOut={() => setShowLogoutConfirm(true)}
         />
 
@@ -215,7 +230,11 @@ export default function App() {
           )}
 
           {screen.view === 'complaints' && (
-            <ComplaintList onSelectComplaint={handleSelectComplaint} isStaff={isStaff} />
+            <ComplaintList
+              onSelectComplaint={handleSelectComplaint}
+              isStaff={isStaff}
+              initialStatusFilter={screen.statusFilter || 'all'}
+            />
           )}
 
           {screen.view === 'officials' && <Officials />}

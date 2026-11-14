@@ -82,7 +82,7 @@ export default function Dashboard({
   const [complaints, setComplaints] = useState<ComplaintWithAction[]>([]);
   const [villageMetrics, setVillageMetrics] = useState<VillageMetrics | null>(null);
   const [loading, setLoading] = useState(true);
-  const [feedFilter, setFeedFilter] = useState<'all' | 'urgent' | 'pending' | 'resolved'>('all');
+  const [feedFilter, setFeedFilter] = useState<'all' | 'urgent' | 'pending' | 'in_progress' | 'resolved'>('all');
 
   // Sarpanch Action Modal
   const [actionModalItem, setActionModalItem] = useState<{ id: number; targetStatus: ComplaintStatus; title: string } | null>(null);
@@ -211,17 +211,18 @@ export default function Dashboard({
   const filteredFeed = complaints.filter((c) => {
     if (feedFilter === 'urgent') return c.priority === 'urgent' || c.priority === 'high';
     if (feedFilter === 'pending') return c.status === 'pending' || c.status === 'under_review';
+    if (feedFilter === 'in_progress') return c.status === 'in_progress';
     if (feedFilter === 'resolved') return c.status === 'resolved';
     return true;
   });
 
   return (
-    <div className="relative z-10 space-y-4 pb-12 animate-fade-in">
+    <div className="relative isolate z-10 space-y-4 pb-12 animate-fade-in">
       <div
         aria-hidden="true"
-        className="pointer-events-none fixed inset-0 -z-0 bg-cover bg-center opacity-100"
+        className="pointer-events-none fixed inset-0 -z-10 bg-cover bg-center"
         style={{
-          backgroundImage: "linear-gradient(rgba(248,250,252,.86), rgba(248,250,252,.95)), url('/village-home-background.png')",
+          backgroundImage: "linear-gradient(rgba(248,250,252,.91), rgba(248,250,252,.96)), url('/village-home-background.png')",
           backgroundSize: 'cover',
           backgroundPosition: 'center 24%',
         }}
@@ -304,35 +305,55 @@ export default function Dashboard({
       <section>
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">
-            Village Grievance Metrics
+            Complaint Overview
           </h2>
           <span className="text-[10px] font-bold text-emerald-700">Live Status</span>
         </div>
 
-        <div className="grid grid-cols-4 gap-2 text-center">
-          <div className="rounded-2xl bg-indigo-50 border border-indigo-100 p-2.5 shadow-2xs">
-            <ClipboardList className="mx-auto h-4 w-4 text-indigo-600 mb-1" />
+        <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
+          <button
+            type="button"
+            aria-pressed={feedFilter === 'all'}
+            onClick={() => setFeedFilter('all')}
+            className={`rounded-2xl border bg-white/95 p-3 shadow-sm backdrop-blur-sm transition hover:-translate-y-0.5 hover:shadow-md ${feedFilter === 'all' ? 'border-indigo-300 ring-2 ring-indigo-100' : 'border-indigo-100'}`}
+          >
+            <ClipboardList className="mx-auto mb-1 h-4 w-4 text-indigo-600" />
             <p className="text-base font-black text-indigo-900">{stats.total}</p>
-            <p className="text-[9px] font-bold text-indigo-600">Total</p>
-          </div>
+            <p className="text-[10px] font-bold text-indigo-700">Everything</p>
+          </button>
 
-          <div className="rounded-2xl bg-amber-50 border border-amber-100 p-2.5 shadow-2xs">
-            <Clock className="mx-auto h-4 w-4 text-amber-600 mb-1" />
+          <button
+            type="button"
+            aria-pressed={feedFilter === 'pending'}
+            onClick={() => setFeedFilter('pending')}
+            className={`rounded-2xl border bg-white/95 p-3 shadow-sm backdrop-blur-sm transition hover:-translate-y-0.5 hover:shadow-md ${feedFilter === 'pending' ? 'border-amber-300 ring-2 ring-amber-100' : 'border-amber-100'}`}
+          >
+            <Clock className="mx-auto mb-1 h-4 w-4 text-amber-600" />
             <p className="text-base font-black text-amber-900">{stats.pending}</p>
-            <p className="text-[9px] font-bold text-amber-600">Review</p>
-          </div>
+            <p className="text-[10px] font-bold text-amber-700">Pending review</p>
+          </button>
 
-          <div className="rounded-2xl bg-sky-50 border border-sky-100 p-2.5 shadow-2xs">
-            <Wrench className="mx-auto h-4 w-4 text-sky-600 mb-1" />
+          <button
+            type="button"
+            aria-pressed={feedFilter === 'in_progress'}
+            onClick={() => setFeedFilter('in_progress')}
+            className={`rounded-2xl border bg-white/95 p-3 shadow-sm backdrop-blur-sm transition hover:-translate-y-0.5 hover:shadow-md ${feedFilter === 'in_progress' ? 'border-sky-300 ring-2 ring-sky-100' : 'border-sky-100'}`}
+          >
+            <Wrench className="mx-auto mb-1 h-4 w-4 text-sky-600" />
             <p className="text-base font-black text-sky-900">{stats.inProgress}</p>
-            <p className="text-[9px] font-bold text-sky-600">Working</p>
-          </div>
+            <p className="text-[10px] font-bold text-sky-700">In progress</p>
+          </button>
 
-          <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-2.5 shadow-2xs">
-            <CheckCircle2 className="mx-auto h-4 w-4 text-emerald-600 mb-1" />
+          <button
+            type="button"
+            aria-pressed={feedFilter === 'resolved'}
+            onClick={() => setFeedFilter('resolved')}
+            className={`rounded-2xl border bg-white/95 p-3 shadow-sm backdrop-blur-sm transition hover:-translate-y-0.5 hover:shadow-md ${feedFilter === 'resolved' ? 'border-emerald-300 ring-2 ring-emerald-100' : 'border-emerald-100'}`}
+          >
+            <CheckCircle2 className="mx-auto mb-1 h-4 w-4 text-emerald-600" />
             <p className="text-base font-black text-emerald-900">{stats.resolved}</p>
-            <p className="text-[9px] font-bold text-emerald-600">Resolved</p>
-          </div>
+            <p className="text-[10px] font-bold text-emerald-700">Resolved cases</p>
+          </button>
         </div>
       </section>
 
@@ -372,7 +393,7 @@ export default function Dashboard({
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
           >
-            All ({stats.total})
+            Everything ({stats.total})
           </button>
           <button
             onClick={() => setFeedFilter('urgent')}
@@ -397,6 +418,17 @@ export default function Dashboard({
             Pending ({stats.pending})
           </button>
           <button
+            onClick={() => setFeedFilter('in_progress')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1 ${
+              feedFilter === 'in_progress'
+                ? 'bg-sky-600 text-white shadow-xs'
+                : 'bg-sky-50 text-sky-800 hover:bg-sky-100'
+            }`}
+          >
+            <Wrench className="h-3 w-3" />
+            In progress ({stats.inProgress})
+          </button>
+          <button
             onClick={() => setFeedFilter('resolved')}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1 ${
               feedFilter === 'resolved'
@@ -405,7 +437,7 @@ export default function Dashboard({
             }`}
           >
             <CheckCircle2 className="h-3 w-3" />
-            Resolved ({stats.resolved})
+            Resolved cases ({stats.resolved})
           </button>
         </div>
 
@@ -413,8 +445,14 @@ export default function Dashboard({
         {filteredFeed.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-slate-200 bg-white p-8 text-center">
             <ClipboardList className="mx-auto h-8 w-8 text-slate-300 mb-2" />
-            <p className="text-xs font-bold text-slate-600">No complaints in this category.</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">All clear in Tandlam Panchayat!</p>
+            <p className="text-xs font-bold text-slate-700">
+              {isStaff ? 'No complaints match this category.' : 'No reports in this category yet.'}
+            </p>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              {isStaff
+                ? 'New submissions will appear here as soon as residents report them.'
+                : 'Your complaints and their status updates will appear here.'}
+            </p>
           </div>
         ) : (
           <div className="space-y-3.5">
