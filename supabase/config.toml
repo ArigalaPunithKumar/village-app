@@ -1,0 +1,10 @@
+project_id = "palle-nestham"
+
+[auth]
+site_url = "com.pallenestam.app://auth/reset-password"
+additional_redirect_urls = [
+  "com.pallenestam.app://auth/reset-password",
+  "https://localhost",
+  "http://localhost:5173",
+  "http://localhost:4173"
+]

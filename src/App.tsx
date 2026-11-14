@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
+import { App as CapacitorApp } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
 import { LogOut, MapPin, Camera, ShieldCheck } from 'lucide-react';
 import BottomTabBar, { type Tab } from '@/components/BottomTabBar';
 import MobileTopBar from '@/components/MobileTopBar';
@@ -13,8 +15,10 @@ import CommunityScreen from '@/components/CommunityScreen';
 import SettingsScreen from '@/components/SettingsScreen';
 import { applyStoredPreferences } from '@/lib/preferences';
 import AuthScreen from '@/components/AuthScreen';
+import ResetPasswordScreen from '@/components/ResetPasswordScreen';
 import SplashScreen from '@/components/SplashScreen';
 import { supabase, fetchCurrentProfile, type ComplaintStatus, type UserProfile, type UserRole } from '@/lib/supabase';
+import { PASSWORD_RESET_REDIRECT_URL } from '@/lib/authRedirect';
 
 type Screen =
   | { view: 'dashboard' }
@@ -24,6 +28,7 @@ type Screen =
   | { view: 'community' }
   | { view: 'settings' }
   | { view: 'profile' }
+  | { view: 'reset-password' }
   | { view: 'success'; ticketNumber: string }
   | { view: 'detail'; complaintId: number };
 
@@ -44,6 +49,9 @@ export default function App() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [role, setRole] = useState<UserRole>('citizen');
   const [screen, setScreen] = useState<Screen>({ view: 'dashboard' });
+  const [passwordRecoveryActive, setPasswordRecoveryActive] = useState(false);
+  const [passwordRecoveryValidating, setPasswordRecoveryValidating] = useState(false);
+  const [passwordRecoveryError, setPasswordRecoveryError] = useState<string | null>(null);
 
   // Confirmation modal state for Logout
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -90,10 +98,63 @@ export default function App() {
     }
   }, []);
 
+  const handlePasswordResetLink = useCallback(async (rawUrl: string) => {
+    let callbackUrl: URL;
+    try {
+      callbackUrl = new URL(rawUrl);
+    } catch {
+      return;
+    }
+    const expectedUrl = new URL(PASSWORD_RESET_REDIRECT_URL);
+    if (
+      callbackUrl.protocol !== expectedUrl.protocol ||
+      callbackUrl.host !== expectedUrl.host ||
+      callbackUrl.pathname !== expectedUrl.pathname
+    ) return;
+
+    setPasswordRecoveryActive(true);
+    setPasswordRecoveryValidating(true);
+    setPasswordRecoveryError(null);
+    setScreen({ view: 'reset-password' });
+
+    try {
+      const query = callbackUrl.searchParams;
+      const hash = new URLSearchParams(callbackUrl.hash.replace(/^#/, ''));
+      const linkError = query.get('error_description') || hash.get('error_description');
+      if (linkError) throw new Error(linkError);
+
+      const code = query.get('code');
+      if (code) {
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
+        if (error) throw error;
+      } else {
+        const accessToken = hash.get('access_token');
+        const refreshToken = hash.get('refresh_token');
+        if (!accessToken || !refreshToken) {
+          throw new Error('This reset link is invalid or expired. Request a new link from the app.');
+        }
+        const { error } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+        if (error) throw error;
+      }
+    } catch (linkErr) {
+      setPasswordRecoveryError(linkErr instanceof Error ? linkErr.message : 'This reset link is invalid or expired. Request a new link from the app.');
+    } finally {
+      setPasswordRecoveryValidating(false);
+    }
+  }, []);
+
   useEffect(() => {
-    loadUserData();
-    const { data: listener } = supabase.auth.onAuthStateChange((_, nextSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession);
+      if (event === 'PASSWORD_RECOVERY') {
+        setPasswordRecoveryActive(true);
+        setPasswordRecoveryValidating(false);
+        setPasswordRecoveryError(null);
+        setScreen({ view: 'reset-password' });
+      }
       if (nextSession) {
         void loadUserData();
       } else {
@@ -101,8 +162,35 @@ export default function App() {
         setRole('citizen');
       }
     });
+    void loadUserData();
     return () => listener.subscription.unsubscribe();
   }, [loadUserData]);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    let active = true;
+    let removeListener: (() => void) | undefined;
+    void CapacitorApp.addListener('appUrlOpen', ({ url }) => {
+      if (active) void handlePasswordResetLink(url);
+    }).then((listener) => {
+      if (active) {
+        removeListener = () => void listener.remove();
+      } else {
+        void listener.remove();
+      }
+    });
+    void CapacitorApp.getLaunchUrl().then((launch) => {
+      if (active && launch?.url) void handlePasswordResetLink(launch.url);
+    }).catch((launchErr: unknown) => {
+      console.warn('Could not inspect the app launch URL:', launchErr);
+    });
+
+    return () => {
+      active = false;
+      removeListener?.();
+    };
+  }, [handlePasswordResetLink]);
 
   // Check one-time permissions after login
   useEffect(() => {
@@ -131,7 +219,26 @@ export default function App() {
     await supabase.auth.signOut();
     setUserProfile(null);
     setRole('citizen');
+    setPasswordRecoveryActive(false);
     setScreen({ view: 'dashboard' });
+  };
+
+  const handlePasswordResetComplete = () => {
+    setPasswordRecoveryActive(false);
+    setPasswordRecoveryError(null);
+    setScreen({ view: 'dashboard' });
+    void loadUserData();
+  };
+
+  const handleLeavePasswordReset = async () => {
+    setPasswordRecoveryActive(false);
+    setPasswordRecoveryError(null);
+    setScreen({ view: 'dashboard' });
+    if (!session) return;
+    await supabase.auth.signOut();
+    setSession(null);
+    setUserProfile(null);
+    setRole('citizen');
   };
 
   const handleAuthenticated = (profile?: UserProfile) => {
@@ -185,6 +292,17 @@ export default function App() {
 
   if (showSplash) return <SplashScreen onComplete={() => setShowSplash(false)} />;
   if (authLoading) return <div className="flex min-h-screen items-center justify-center bg-[#f7fbf5]" />;
+
+  if (passwordRecoveryActive) {
+    return (
+      <ResetPasswordScreen
+        error={passwordRecoveryError}
+        validating={passwordRecoveryValidating}
+        onComplete={handlePasswordResetComplete}
+        onCancel={() => void handleLeavePasswordReset()}
+      />
+    );
+  }
 
   if (!session && !userProfile) {
     return (

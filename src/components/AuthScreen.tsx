@@ -21,6 +21,7 @@ import {
   type UserProfile,
   type UserGender,
 } from '@/lib/supabase';
+import { getPasswordResetRedirectUrl } from '@/lib/authRedirect';
 
 interface AuthScreenProps {
   onAuthenticated: (profile?: UserProfile) => void;
@@ -198,7 +199,9 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
     setForgotLoading(true);
 
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/` });
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: getPasswordResetRedirectUrl(),
+      });
       if (error) throw error;
       setForgotSuccess('If an account exists for that email, a secure password reset link is on its way.');
     } catch (err) {

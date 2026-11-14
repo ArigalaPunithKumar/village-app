@@ -11,6 +11,7 @@ dist
 dist-ssr
 *.local
 *.apk
+supabase/.temp/
 
 .vscode/*
 !.vscode/extensions.json

@@ -77,3 +77,7 @@ WHERE email = 'admin@example.com';
 ```
 
 After that, Admins can invite Citizen, Sarpanch, and Admin accounts from Account Management. Invitations and password-reset links use Supabase Auth email delivery, so configure the project's email provider and allowed redirect URLs first.
+
+### Android password recovery links
+
+The Android app handles reset links with the `com.pallenestam.app://auth/reset-password` deep link. In Supabase Dashboard → Authentication → URL Configuration, set **Site URL** to that URI and add the same URI under **Redirect URLs**. Keep the local development URLs in `supabase/config.toml` only if you also use the Supabase CLI locally. Install the updated APK before requesting another reset link; links already sent with a `localhost` destination will continue to fail.

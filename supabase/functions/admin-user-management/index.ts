@@ -44,7 +44,7 @@ Deno.serve(async (request) => {
       }
       const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
         data: { display_name: displayName, phone },
-        redirectTo: request.headers.get('origin') || url,
+        redirectTo: getAuthRedirectUrl(request),
       });
       if (error || !data.user) return json({ error: error?.message || 'Could not invite this account' }, 400);
       const { error: profileError } = await admin.from('profiles').update({ display_name: displayName, phone, email, role })
@@ -63,7 +63,7 @@ Deno.serve(async (request) => {
         .eq('id', targetId).eq('email', email).is('deleted_at', null).maybeSingle();
       if (!target) return json({ error: 'Account not found' }, 404);
       const { error } = await authClient.auth.resetPasswordForEmail(email, {
-        redirectTo: request.headers.get('origin') || url,
+        redirectTo: getAuthRedirectUrl(request),
       });
       if (error) return json({ error: error.message }, 400);
       await admin.from('audit_logs').insert({
@@ -83,4 +83,20 @@ function json(body: Record<string, unknown>, status = 200) {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
+}
+
+function getAuthRedirectUrl(request: Request): string {
+  const mobileRedirect = 'com.pallenestam.app://auth/reset-password';
+  const origin = request.headers.get('origin');
+  if (!origin) return mobileRedirect;
+
+  try {
+    const parsedOrigin = new URL(origin);
+    if (parsedOrigin.hostname === 'localhost' || parsedOrigin.hostname === '127.0.0.1') {
+      return mobileRedirect;
+    }
+    return `${parsedOrigin.origin}/`;
+  } catch {
+    return mobileRedirect;
+  }
 }
