@@ -13,6 +13,7 @@ import {
   Clock,
   KeyRound,
   CheckCircle2,
+  Home,
 } from 'lucide-react';
 import {
   supabase,
@@ -213,20 +214,11 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
       <div aria-hidden="true" className="auth-glow auth-glow-two" />
       <div className="auth-layout relative z-10 mx-auto grid w-full max-w-5xl overflow-hidden rounded-[2rem] shadow-[0_32px_100px_-38px_rgba(15,48,34,.55)] lg:min-h-[680px] lg:grid-cols-[.92fr_1.08fr]">
         <aside className="auth-hero relative isolate flex min-h-[205px] flex-col justify-between overflow-hidden px-6 py-5 text-white sm:min-h-[235px] sm:px-8 sm:py-7 lg:min-h-full lg:px-10 lg:py-10">
-          <img
-            src="/sarpanch.jpg"
-            alt="Tandlam Panchayat Sarpanch"
-            className="auth-hero-photo absolute inset-0 -z-20 h-full w-full object-cover object-[center_20%]"
-            onError={(e) => {
-              (e.target as HTMLElement).style.display = 'none';
-            }}
-          />
-          <div aria-hidden="true" className="absolute inset-0 -z-10 bg-gradient-to-br from-[#073b2d]/85 via-[#0c5643]/77 to-[#092c32]/90" />
           <div aria-hidden="true" className="auth-hero-pattern absolute inset-0 -z-10 opacity-40" />
 
           <div className="flex items-center gap-3">
-            <div className="h-12 w-12 shrink-0 overflow-hidden rounded-2xl border border-white/70 bg-white/15 shadow-lg ring-1 ring-white/30">
-              <img src="/palle-nestham-logo.png" alt="" className="h-full w-full bg-white object-contain p-0.5" />
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/35 bg-white/15 text-white shadow-lg ring-1 ring-white/20 backdrop-blur-sm">
+              <Home aria-hidden="true" className="h-6 w-6" strokeWidth={2.25} />
             </div>
             <div className="min-w-0">
               <p className="text-lg font-extrabold tracking-tight">Palle Nestham</p>
@@ -417,7 +409,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Lakshmi Devi"
+                    placeholder="Enter your name"
                     className="auth-input w-full rounded-2xl border py-3 pl-10 pr-3.5 text-sm outline-none transition"
                     required
                   />

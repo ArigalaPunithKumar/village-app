@@ -164,6 +164,13 @@ export default function App() {
       ? 'Grievance Submitted'
       : TAB_TITLES[activeTab] || 'Palle Nestham';
 
+  const screenTransitionKey =
+    screen.view === 'detail'
+      ? `detail-${screen.complaintId}`
+      : screen.view === 'success'
+      ? `success-${screen.ticketNumber}`
+      : screen.view;
+
   if (showSplash) return <SplashScreen onComplete={() => setShowSplash(false)} />;
   if (authLoading) return <div className="flex min-h-screen items-center justify-center bg-[#f7fbf5]" />;
 
@@ -187,7 +194,10 @@ export default function App() {
           onSignOut={() => setShowLogoutConfirm(true)}
         />
 
-        <main className="min-h-[calc(100vh-56px)] px-4 pb-28 pt-4 sm:px-6 lg:px-8">
+        <BottomTabBar active={activeTab} onChange={handleTabChange} role={role} />
+
+        <main className="min-h-[calc(100vh-56px)] px-4 pb-28 pt-4 sm:px-6 lg:px-8 lg:pb-12">
+          <div key={screenTransitionKey} className="screen-transition">
           {screen.view === 'dashboard' && (
             <Dashboard
               onNavigate={handleTabChange}
@@ -244,9 +254,8 @@ export default function App() {
               onNewReport={() => setScreen({ view: 'report' })}
             />
           )}
+          </div>
         </main>
-
-        <BottomTabBar active={activeTab} onChange={handleTabChange} role={role} />
 
         {/* ======================================================== */}
         {/* ONE-TIME FIRST-LOGIN PERMISSIONS PROMPT                 */}
