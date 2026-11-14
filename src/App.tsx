@@ -134,6 +134,16 @@ export default function App() {
     setScreen({ view: 'dashboard' });
   };
 
+  const handleAuthenticated = (profile?: UserProfile) => {
+    // Always land on the role-aware dashboard after a successful login or signup.
+    setScreen({ view: 'dashboard' });
+    if (profile) {
+      setUserProfile(profile);
+      setRole(profile.role || 'citizen');
+    }
+    void loadUserData();
+  };
+
   const isStaff = role === 'sarpanch' || role === 'admin';
 
   const activeTab: Tab =
@@ -160,13 +170,7 @@ export default function App() {
   if (!session && !userProfile) {
     return (
       <AuthScreen
-        onAuthenticated={(profile?: UserProfile) => {
-          if (profile) {
-            setUserProfile(profile);
-            setRole(profile.role || 'citizen');
-          }
-          void loadUserData();
-        }}
+        onAuthenticated={handleAuthenticated}
       />
     );
   }

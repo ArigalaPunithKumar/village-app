@@ -417,7 +417,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Punith Kumar"
+                    placeholder="e.g. Lakshmi Devi"
                     className="auth-input w-full rounded-2xl border py-3 pl-10 pr-3.5 text-sm outline-none transition"
                     required
                   />
