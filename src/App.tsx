@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { LogOut, MapPin, Camera, ShieldCheck, Check } from 'lucide-react';
+import { App as CapacitorApp } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
+import { LogOut, MapPin, Camera, ShieldCheck } from 'lucide-react';
 import BottomTabBar, { type Tab } from '@/components/BottomTabBar';
 import MobileTopBar from '@/components/MobileTopBar';
 import Dashboard from '@/components/Dashboard';
@@ -9,16 +11,24 @@ import ComplaintList from '@/components/ComplaintList';
 import ComplaintDetail from '@/components/ComplaintDetail';
 import Officials from '@/components/Officials';
 import ProfileScreen from '@/components/ProfileScreen';
+import CommunityScreen from '@/components/CommunityScreen';
+import SettingsScreen from '@/components/SettingsScreen';
+import { applyStoredPreferences } from '@/lib/preferences';
 import AuthScreen from '@/components/AuthScreen';
+import ResetPasswordScreen from '@/components/ResetPasswordScreen';
 import SplashScreen from '@/components/SplashScreen';
-import { supabase, fetchCurrentProfile, type UserProfile, type UserRole } from '@/lib/supabase';
+import { supabase, fetchCurrentProfile, type ComplaintStatus, type UserProfile, type UserRole } from '@/lib/supabase';
+import { PASSWORD_RESET_REDIRECT_URL } from '@/lib/authRedirect';
 
 type Screen =
   | { view: 'dashboard' }
   | { view: 'report' }
-  | { view: 'complaints' }
+  | { view: 'complaints'; statusFilter?: ComplaintStatus }
   | { view: 'officials' }
+  | { view: 'community' }
+  | { view: 'settings' }
   | { view: 'profile' }
+  | { view: 'reset-password' }
   | { view: 'success'; ticketNumber: string }
   | { view: 'detail'; complaintId: number };
 
@@ -28,22 +38,20 @@ const TAB_TITLES: Record<Tab, string> = {
   complaints: 'Complaints Feed',
   officials: 'Panchayat Team',
   profile: 'Resident Profile',
+  community: 'Village Community',
+  settings: 'Settings',
 };
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(() => {
-    try {
-      const stored = localStorage.getItem('palle_current_user');
-      return stored ? JSON.parse(stored) : null;
-    } catch {
-      return null;
-    }
-  });
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [role, setRole] = useState<UserRole>('citizen');
   const [screen, setScreen] = useState<Screen>({ view: 'dashboard' });
+  const [passwordRecoveryActive, setPasswordRecoveryActive] = useState(false);
+  const [passwordRecoveryValidating, setPasswordRecoveryValidating] = useState(false);
+  const [passwordRecoveryError, setPasswordRecoveryError] = useState<string | null>(null);
 
   // Confirmation modal state for Logout
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -51,46 +59,138 @@ export default function App() {
   // One-time permission prompt for first-time users
   const [showPermissionPrompt, setShowPermissionPrompt] = useState(false);
 
-  const loadUserData = useCallback(async () => {
-    // Read local resident login first for instant responsiveness
-    try {
-      const storedRaw = localStorage.getItem('palle_current_user');
-      if (storedRaw) {
-        const parsed = JSON.parse(storedRaw);
-        setUserProfile(parsed);
-        setRole(parsed.role || 'citizen');
-      }
-    } catch (e) {
-      console.warn('Error reading stored user', e);
-    }
+  useEffect(() => {
+    // Remove credentials and elevated-role flags written by the former local-only auth flow.
+    localStorage.removeItem('palle_user_registry');
+    localStorage.removeItem('palle_current_user');
+    localStorage.removeItem('palle_admin_approval_queue');
+    applyStoredPreferences();
+  }, []);
 
+  const loadUserData = useCallback(async () => {
     try {
       const { data } = await supabase.auth.getSession();
       setSession(data.session);
 
       if (data.session) {
         const p = await fetchCurrentProfile();
-        if (p) {
+        if (p && !p.blocked && p.is_active) {
           setUserProfile(p);
           setRole(p.role);
+        } else {
+          localStorage.removeItem('palle_current_user');
+          setUserProfile(null);
+          setRole('citizen');
+          await supabase.auth.signOut();
         }
+      } else {
+        localStorage.removeItem('palle_current_user');
+        setUserProfile(null);
+        setRole('citizen');
       }
     } catch (sessionErr) {
       console.warn('Supabase getSession notice', sessionErr);
+      setSession(null);
+      setUserProfile(null);
+      setRole('citizen');
+    } finally {
+      setAuthLoading(false);
     }
-    setAuthLoading(false);
+  }, []);
+
+  const handlePasswordResetLink = useCallback(async (rawUrl: string) => {
+    let callbackUrl: URL;
+    try {
+      callbackUrl = new URL(rawUrl);
+    } catch {
+      return;
+    }
+    const expectedUrl = new URL(PASSWORD_RESET_REDIRECT_URL);
+    if (
+      callbackUrl.protocol !== expectedUrl.protocol ||
+      callbackUrl.host !== expectedUrl.host ||
+      callbackUrl.pathname !== expectedUrl.pathname
+    ) return;
+
+    setPasswordRecoveryActive(true);
+    setPasswordRecoveryValidating(true);
+    setPasswordRecoveryError(null);
+    setScreen({ view: 'reset-password' });
+
+    try {
+      const query = callbackUrl.searchParams;
+      const hash = new URLSearchParams(callbackUrl.hash.replace(/^#/, ''));
+      const linkError = query.get('error_description') || hash.get('error_description');
+      if (linkError) throw new Error(linkError);
+
+      const code = query.get('code');
+      if (code) {
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
+        if (error) throw error;
+      } else {
+        const accessToken = hash.get('access_token');
+        const refreshToken = hash.get('refresh_token');
+        if (!accessToken || !refreshToken) {
+          throw new Error('This reset link is invalid or expired. Request a new link from the app.');
+        }
+        const { error } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+        if (error) throw error;
+      }
+    } catch (linkErr) {
+      setPasswordRecoveryError(linkErr instanceof Error ? linkErr.message : 'This reset link is invalid or expired. Request a new link from the app.');
+    } finally {
+      setPasswordRecoveryValidating(false);
+    }
   }, []);
 
   useEffect(() => {
-    loadUserData();
-    const { data: listener } = supabase.auth.onAuthStateChange((_, nextSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession);
+      if (event === 'PASSWORD_RECOVERY') {
+        setPasswordRecoveryActive(true);
+        setPasswordRecoveryValidating(false);
+        setPasswordRecoveryError(null);
+        setScreen({ view: 'reset-password' });
+      }
       if (nextSession) {
         void loadUserData();
+      } else {
+        setUserProfile(null);
+        setRole('citizen');
       }
     });
+    void loadUserData();
     return () => listener.subscription.unsubscribe();
   }, [loadUserData]);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    let active = true;
+    let removeListener: (() => void) | undefined;
+    void CapacitorApp.addListener('appUrlOpen', ({ url }) => {
+      if (active) void handlePasswordResetLink(url);
+    }).then((listener) => {
+      if (active) {
+        removeListener = () => void listener.remove();
+      } else {
+        void listener.remove();
+      }
+    });
+    void CapacitorApp.getLaunchUrl().then((launch) => {
+      if (active && launch?.url) void handlePasswordResetLink(launch.url);
+    }).catch((launchErr: unknown) => {
+      console.warn('Could not inspect the app launch URL:', launchErr);
+    });
+
+    return () => {
+      active = false;
+      removeListener?.();
+    };
+  }, [handlePasswordResetLink]);
 
   // Check one-time permissions after login
   useEffect(() => {
@@ -116,21 +216,39 @@ export default function App() {
 
   const handleConfirmLogout = async () => {
     setShowLogoutConfirm(false);
-    localStorage.removeItem('palle_current_user');
     await supabase.auth.signOut();
     setUserProfile(null);
     setRole('citizen');
+    setPasswordRecoveryActive(false);
     setScreen({ view: 'dashboard' });
   };
 
-  const handleRoleChange = (newRole: UserRole) => {
-    setRole(newRole);
-    setUserProfile((prev) => {
-      if (!prev) return null;
-      const updated = { ...prev, role: newRole };
-      localStorage.setItem('palle_current_user', JSON.stringify(updated));
-      return updated;
-    });
+  const handlePasswordResetComplete = () => {
+    setPasswordRecoveryActive(false);
+    setPasswordRecoveryError(null);
+    setScreen({ view: 'dashboard' });
+    void loadUserData();
+  };
+
+  const handleLeavePasswordReset = async () => {
+    setPasswordRecoveryActive(false);
+    setPasswordRecoveryError(null);
+    setScreen({ view: 'dashboard' });
+    if (!session) return;
+    await supabase.auth.signOut();
+    setSession(null);
+    setUserProfile(null);
+    setRole('citizen');
+  };
+
+  const handleAuthenticated = (profile?: UserProfile) => {
+    // Always land on the role-aware dashboard after a successful login or signup.
+    setScreen({ view: 'dashboard' });
+    if (profile) {
+      setUserProfile(profile);
+      setRole(profile.role || 'citizen');
+    }
+    void loadUserData();
   };
 
   const isStaff = role === 'sarpanch' || role === 'admin';
@@ -140,7 +258,18 @@ export default function App() {
       ? 'complaints'
       : (screen.view as Tab);
 
-  const handleTabChange = (tab: Tab) => setScreen({ view: tab });
+  const handleTabChange = (tab: Tab) => {
+    if (tab === 'report' && role !== 'citizen') return;
+    setScreen({ view: tab });
+  };
+  const handleMenuNavigate = (tab: Tab, statusFilter?: ComplaintStatus) => {
+    if (tab === 'report' && role !== 'citizen') return;
+    if (tab === 'complaints' && statusFilter) {
+      setScreen({ view: 'complaints', statusFilter });
+      return;
+    }
+    handleTabChange(tab);
+  };
   const handleSelectComplaint = (id: number) => setScreen({ view: 'detail', complaintId: id });
 
   const topTitle =
@@ -148,38 +277,60 @@ export default function App() {
       ? 'Complaint Details'
       : screen.view === 'success'
       ? 'Grievance Submitted'
+      : screen.view === 'complaints' && screen.statusFilter === 'resolved'
+      ? 'Resolved Cases'
       : TAB_TITLES[activeTab] || 'Palle Nestham';
+
+  const screenTransitionKey =
+    screen.view === 'detail'
+      ? `detail-${screen.complaintId}`
+      : screen.view === 'success'
+      ? `success-${screen.ticketNumber}`
+      : screen.view === 'complaints'
+      ? `complaints-${screen.statusFilter || 'all'}`
+      : screen.view;
 
   if (showSplash) return <SplashScreen onComplete={() => setShowSplash(false)} />;
   if (authLoading) return <div className="flex min-h-screen items-center justify-center bg-[#f7fbf5]" />;
 
+  if (passwordRecoveryActive) {
+    return (
+      <ResetPasswordScreen
+        error={passwordRecoveryError}
+        validating={passwordRecoveryValidating}
+        onComplete={handlePasswordResetComplete}
+        onCancel={() => void handleLeavePasswordReset()}
+      />
+    );
+  }
+
   if (!session && !userProfile) {
     return (
       <AuthScreen
-        onAuthenticated={(profile?: UserProfile) => {
-          if (profile) {
-            setUserProfile(profile);
-            setRole(profile.role || 'citizen');
-          }
-          void loadUserData();
-        }}
+        onAuthenticated={handleAuthenticated}
       />
     );
   }
 
   return (
     <div className="flex min-h-screen justify-center bg-slate-100 font-sans">
-      <div className="relative w-full max-w-[420px] bg-slate-50 shadow-2xl min-h-screen">
+      <div className="relative w-full max-w-[1100px] bg-slate-50 shadow-2xl min-h-screen">
         <MobileTopBar
           title={topTitle}
           email={userProfile?.email || session?.user?.email || ''}
           role={role}
           userName={userProfile?.display_name || ''}
+          active={activeTab}
+          activeStatusFilter={screen.view === 'complaints' ? screen.statusFilter : undefined}
           onOpenProfile={() => setScreen({ view: 'profile' })}
+          onNavigate={handleMenuNavigate}
           onSignOut={() => setShowLogoutConfirm(true)}
         />
 
-        <main className="min-h-[calc(100vh-56px)] px-4 pb-28 pt-4">
+        <BottomTabBar active={activeTab} onChange={handleTabChange} role={role} />
+
+        <main className="min-h-[calc(100vh-56px)] px-4 pb-28 pt-4 sm:px-6 lg:px-8 lg:pb-12">
+          <div key={screenTransitionKey} className="screen-transition">
           {screen.view === 'dashboard' && (
             <Dashboard
               onNavigate={handleTabChange}
@@ -197,16 +348,28 @@ export default function App() {
           )}
 
           {screen.view === 'complaints' && (
-            <ComplaintList onSelectComplaint={handleSelectComplaint} isStaff={isStaff} />
+            <ComplaintList
+              onSelectComplaint={handleSelectComplaint}
+              isStaff={isStaff}
+              initialStatusFilter={screen.statusFilter || 'all'}
+            />
           )}
 
-          {screen.view === 'officials' && <Officials isStaff={isStaff} />}
+          {screen.view === 'officials' && <Officials />}
+
+          {screen.view === 'community' && userProfile && (
+            <CommunityScreen userId={userProfile.id} role={role} onOpenOfficials={() => handleTabChange('officials')} />
+          )}
+
+          {screen.view === 'settings' && (
+            <SettingsScreen role={role} onSignOut={() => setShowLogoutConfirm(true)} />
+          )}
 
           {screen.view === 'profile' && userProfile && (
             <ProfileScreen
               profile={userProfile}
-              onRoleChange={handleRoleChange}
               onSignOut={() => setShowLogoutConfirm(true)}
+              onOpenSettings={() => setScreen({ view: 'settings' })}
             />
           )}
 
@@ -215,6 +378,7 @@ export default function App() {
               complaintId={screen.complaintId}
               onBack={() => setScreen({ view: 'complaints' })}
               canUpdate={isStaff}
+              canReopen={role === 'citizen'}
               isAdmin={role === 'admin'}
               updatedBy={userProfile?.display_name || 'Panchayat Team'}
             />
@@ -227,9 +391,8 @@ export default function App() {
               onNewReport={() => setScreen({ view: 'report' })}
             />
           )}
+          </div>
         </main>
-
-        <BottomTabBar active={activeTab} onChange={handleTabChange} isStaff={isStaff} />
 
         {/* ======================================================== */}
         {/* ONE-TIME FIRST-LOGIN PERMISSIONS PROMPT                 */}

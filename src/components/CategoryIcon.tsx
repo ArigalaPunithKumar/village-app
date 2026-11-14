@@ -37,9 +37,10 @@ interface CategoryIconProps {
   category: ComplaintCategory;
   size?: 'sm' | 'md' | 'lg';
   withLabel?: boolean;
+  className?: string;
 }
 
-export default function CategoryIcon({ category, size = 'md', withLabel = false }: CategoryIconProps) {
+export default function CategoryIcon({ category, size = 'md', withLabel = false, className = '' }: CategoryIconProps) {
   const meta = CATEGORY_META[category];
   const Icon = ICONS[meta.icon] ?? Flag;
   const colors = COLOR_MAP[meta.color] ?? COLOR_MAP.slate;
@@ -53,7 +54,7 @@ export default function CategoryIcon({ category, size = 'md', withLabel = false 
       <div
         className={`${containerSize} ${radius} ${colors.bg} ${colors.text} flex items-center justify-center ring-1 ${colors.ring}`}
       >
-        <Icon className={iconSize} />
+        <Icon className={`${iconSize} ${className}`} />
       </div>
       {withLabel && (
         <span className="text-sm font-medium text-slate-700">{meta.label}</span>

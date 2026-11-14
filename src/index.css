@@ -56,6 +56,27 @@
   50% { border-color: rgba(16, 185, 129, 0.9); }
 }
 
+@keyframes authCardEnter {
+  from { opacity: 0; transform: translateY(22px) scale(.985); filter: blur(6px); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+
+@keyframes authFormEnter {
+  from { opacity: 0; transform: translateX(14px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes screenEnter {
+  from { opacity: 0; transform: translateY(14px); filter: blur(3px); }
+  to { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+@keyframes menuIconPop {
+  0% { transform: scale(.82); }
+  65% { transform: scale(1.1); }
+  100% { transform: scale(1); }
+}
+
 .animate-fade-in {
   animation: fadeIn 350ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
@@ -83,6 +104,22 @@
 .animate-ring-glow {
   animation: ringGlow 2s ease-in-out infinite;
 }
+
+.auth-layout { animation: authCardEnter 650ms cubic-bezier(.2, .8, .2, 1) both; }
+.auth-hero > div:last-child { animation: authFormEnter 650ms 120ms cubic-bezier(.2, .8, .2, 1) both; }
+.auth-form-card form { animation: authFormEnter 360ms cubic-bezier(.2, .8, .2, 1) both; }
+.auth-input,
+.auth-choice,
+.auth-segment-button { transition: color 180ms ease, background-color 180ms ease, border-color 180ms ease, box-shadow 220ms ease, transform 220ms cubic-bezier(.2, .8, .2, 1); }
+.auth-input:focus { transform: translateY(-1px); }
+.auth-segment-button:hover { transform: translateY(-1px); }
+.auth-segment-button:active { transform: scale(.985); }
+.screen-transition { animation: screenEnter 360ms cubic-bezier(.2, .8, .2, 1) both; }
+.app-menu-item { transition: color 180ms ease, background-color 220ms ease, transform 220ms cubic-bezier(.2, .8, .2, 1); }
+.app-menu-item.is-active { background: #f0f8f2; }
+.app-menu-item:hover { transform: translateY(-2px); }
+.app-menu-item.is-active .app-menu-icon { animation: menuIconPop 320ms cubic-bezier(.2, .8, .2, 1) both; }
+.app-menu-icon { transition: color 180ms ease, background-color 220ms ease, transform 220ms ease; }
 
 /* Glassmorphism helpers */
 .glass-card {
@@ -180,4 +217,150 @@
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+}
+
+/* Shared dark theme for the app's Tailwind utility surfaces. */
+html.theme-dark body { background: #0b1220; color: #e2e8f0; }
+html.theme-dark .bg-white { background-color: #172033 !important; }
+html.theme-dark .bg-slate-50 { background-color: #111a2b !important; }
+html.theme-dark .bg-slate-100 { background-color: #1d293d !important; }
+html.theme-dark .bg-slate-200 { background-color: #334155 !important; }
+html.theme-dark .text-slate-900 { color: #f1f5f9 !important; }
+html.theme-dark .text-slate-800 { color: #e2e8f0 !important; }
+html.theme-dark .text-slate-700 { color: #cbd5e1 !important; }
+html.theme-dark .text-slate-600 { color: #cbd5e1 !important; }
+html.theme-dark .text-slate-500 { color: #94a3b8 !important; }
+html.theme-dark .border-slate-100,
+html.theme-dark .border-slate-200 { border-color: #334155 !important; }
+html.theme-dark input:not([type='checkbox']),
+html.theme-dark textarea,
+html.theme-dark select { background-color: #111a2b; color: #e2e8f0; border-color: #475569; }
+html.theme-dark input::placeholder,
+html.theme-dark textarea::placeholder { color: #94a3b8; }
+
+/* Auth screens stay legible when a saved dark theme is active. */
+.auth-screen {
+  isolation: isolate;
+  background:
+    radial-gradient(ellipse at 12% 8%, rgba(177, 222, 184, .48), transparent 34%),
+    radial-gradient(ellipse at 88% 92%, rgba(176, 215, 211, .4), transparent 36%),
+    linear-gradient(135deg, #edf6ed 0%, #f7faf5 52%, #eaf2ee 100%);
+}
+.auth-glow {
+  position: absolute;
+  width: 18rem;
+  height: 18rem;
+  border-radius: 9999px;
+  filter: blur(2px);
+  pointer-events: none;
+  opacity: .45;
+}
+.auth-glow-one { top: -10rem; left: -8rem; background: #bddfc2; }
+.auth-glow-two { right: -9rem; bottom: -11rem; width: 24rem; height: 24rem; background: #badbd5; }
+.auth-layout { border: 1px solid rgba(255, 255, 255, .88); background: #fff; }
+.auth-hero {
+  background:
+    radial-gradient(ellipse at 78% 8%, rgba(80, 186, 126, .32), transparent 37%),
+    radial-gradient(ellipse at 12% 94%, rgba(32, 123, 112, .34), transparent 38%),
+    linear-gradient(145deg, #0b5039 0%, #0b453c 48%, #092f34 100%);
+}
+.auth-hero::before {
+  position: absolute;
+  z-index: -1;
+  top: -7rem;
+  right: -6rem;
+  width: min(23rem, 74%);
+  aspect-ratio: 1;
+  border: 1px solid rgba(224, 255, 237, .2);
+  border-radius: 9999px;
+  box-shadow: 0 0 0 24px rgba(224, 255, 237, .045), 0 0 0 54px rgba(224, 255, 237, .035);
+  content: '';
+  pointer-events: none;
+}
+.auth-hero-pattern {
+  background-image: radial-gradient(rgba(255,255,255,.35) .7px, transparent .7px);
+  background-size: 16px 16px;
+  mask-image: linear-gradient(120deg, transparent 5%, #000 100%);
+}
+.auth-panel { background: #fff; }
+.auth-form-card { border-color: #e6eee7; background: #fff; }
+.auth-eyebrow { color: #16734f; }
+.auth-heading { color: #17271e; }
+.auth-subtitle { color: #697a70; }
+.auth-label { color: #43534a; }
+.auth-input {
+  min-height: 3rem;
+  border-color: #dce6de;
+  background: #f8faf8;
+  color: #18251d;
+  caret-color: #087a55;
+}
+.auth-input::placeholder { color: #87958c; opacity: 1; }
+.auth-input:focus {
+  border-color: #16845f;
+  box-shadow: 0 0 0 4px rgba(22, 132, 95, .14);
+}
+.auth-segment { background: #eff4ef; }
+.auth-segment-button { color: #607168; }
+.auth-segment-button:hover { color: #173d2e; }
+.auth-segment-button.is-active {
+  background: #fff;
+  color: #116340;
+  box-shadow: 0 2px 8px rgba(24, 52, 37, .1);
+}
+.auth-choice { border-color: #e0e8e1; background: #f7f9f7; color: #536259; }
+.auth-choice:hover { background: #eef5ef; }
+.auth-choice.is-selected {
+  border-color: #1b936a;
+  background: #e6f6ec;
+  color: #10573b;
+  box-shadow: 0 0 0 2px rgba(27, 147, 106, .15);
+}
+.auth-footer { color: #8a9890; }
+
+html.theme-dark .auth-screen {
+  background:
+    radial-gradient(ellipse at 12% 8%, rgba(26, 89, 65, .25), transparent 34%),
+    radial-gradient(ellipse at 88% 92%, rgba(30, 79, 80, .22), transparent 36%),
+    linear-gradient(135deg, #0d1716 0%, #101b1b 52%, #111c20 100%);
+}
+html.theme-dark .auth-layout,
+html.theme-dark .auth-panel { background: #111b1c; }
+html.theme-dark .auth-form-card { border-color: #2b3a38; background: #14201f; }
+html.theme-dark .auth-eyebrow { color: #6dd2a5; }
+html.theme-dark .auth-heading { color: #f2f8f4; }
+html.theme-dark .auth-subtitle,
+html.theme-dark .auth-footer { color: #a5b5ad; }
+html.theme-dark .auth-label { color: #d2ddd6; }
+html.theme-dark .auth-input { border-color: #3c504b; background: #1a2927; color: #f2f8f4; }
+html.theme-dark .auth-input::placeholder { color: #9aaea5; }
+html.theme-dark .auth-input:focus { border-color: #55c394; box-shadow: 0 0 0 4px rgba(85, 195, 148, .18); }
+html.theme-dark .auth-segment { background: #1c2a28; }
+html.theme-dark .auth-segment-button { color: #bdccc4; }
+html.theme-dark .auth-segment-button:hover { color: #f3faf6; }
+html.theme-dark .auth-segment-button.is-active { background: #2a3a35; color: #8ce0b6; box-shadow: 0 2px 8px rgba(0, 0, 0, .25); }
+html.theme-dark .auth-choice { border-color: #3c504b; background: #1a2927; color: #c4d2cb; }
+html.theme-dark .auth-choice:hover { background: #233732; }
+html.theme-dark .auth-choice.is-selected { border-color: #55c394; background: #19382d; color: #9aebc3; box-shadow: 0 0 0 2px rgba(85, 195, 148, .16); }
+html.theme-dark .app-menu-bar { border-color: #2d403c; background: rgba(17, 27, 28, .96); }
+html.theme-dark .app-menu-item.is-active { background: rgba(50, 104, 79, .2); }
+html.theme-dark .app-menu-item.is-active .app-menu-label { color: #8ce0b6; }
+html.theme-dark .app-menu-icon.bg-emerald-50 { background: #1a382d; color: #8ce0b6; }
+
+@media (min-width: 1024px) {
+  .auth-layout { min-height: min(760px, calc(100svh - 4rem)); }
+}
+
+@media (max-width: 639px) {
+  .auth-panel { padding-top: 1.35rem; padding-bottom: 1.5rem; }
+  .auth-form-card { padding: 1.1rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
 }

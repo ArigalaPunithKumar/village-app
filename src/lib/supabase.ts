@@ -22,6 +22,7 @@ export type ComplaintCategory =
   | 'street_light'
   | 'drainage'
   | 'waste'
+  | 'infrastructure'
   | 'other';
 
 export type ComplaintPriority = 'low' | 'medium' | 'high' | 'urgent';
@@ -57,6 +58,7 @@ export interface StatusUpdate {
   status: ComplaintStatus;
   note: string | null;
   updated_by: string;
+  evidence_url?: string | null;
   created_at: string;
 }
 
@@ -77,6 +79,7 @@ export const CATEGORY_META: Record<
   street_light: { label: 'Street Lights', icon: 'lightbulb', color: 'violet' },
   drainage: { label: 'Drainage', icon: 'waves', color: 'cyan' },
   waste: { label: 'Waste Management', icon: 'trash', color: 'lime' },
+  infrastructure: { label: 'Public Infrastructure', icon: 'road', color: 'amber' },
   other: { label: 'Other', icon: 'flag', color: 'slate' },
 };
 
@@ -94,7 +97,7 @@ export const STATUS_META: Record<
   ComplaintStatus,
   { label: string; color: string; dot: string; description: string }
 > = {
-  pending: { label: 'Pending', color: 'bg-slate-100 text-slate-700 border-slate-200', dot: 'bg-slate-400', description: 'Report received, awaiting review' },
+  pending: { label: 'Submitted', color: 'bg-slate-100 text-slate-700 border-slate-200', dot: 'bg-slate-400', description: 'Report received, awaiting review' },
   under_review: { label: 'Under Review', color: 'bg-blue-100 text-blue-700 border-blue-200', dot: 'bg-blue-500', description: 'Officials are reviewing the report' },
   in_progress: { label: 'In Progress', color: 'bg-amber-100 text-amber-700 border-amber-200', dot: 'bg-amber-500', description: 'Work has begun on the issue' },
   resolved: { label: 'Resolved', color: 'bg-emerald-100 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500', description: 'The problem has been fixed' },
@@ -151,101 +154,47 @@ export interface UserProfile {
   aadhaar?: string;
   role: UserRole;
   blocked?: boolean;
+  is_active?: boolean;
   pending_admin_approval?: boolean;
   created_at?: string;
 }
 
-export interface AdminApprovalRequest {
-  id: string;
-  user_id: string;
-  display_name: string;
-  phone: string;
-  email: string;
-  requested_at: string;
-  status: 'pending' | 'approved' | 'rejected';
-}
-
 export async function fetchCurrentProfile(): Promise<UserProfile | null> {
-  const { data: authData } = await supabase.auth.getUser();
+  const { data: authData, error: authError } = await supabase.auth.getUser();
   const user = authData?.user;
-  if (!user) return null;
+  if (!user || authError) return null;
 
-  // Local cache fallback
-  const cachedRaw = localStorage.getItem(`palle_profile_${user.id}`);
-  const cached = cachedRaw ? JSON.parse(cachedRaw) : null;
-
-  let dbRole: UserRole = 'citizen';
-  let dbName = '';
-  try {
-    const { data } = await supabase
-      .from('profiles')
-      .select('display_name, role')
-      .eq('id', user.id)
-      .maybeSingle();
-    if (data) {
-      if (data.role) dbRole = data.role as UserRole;
-      if (data.display_name) dbName = data.display_name;
-    }
-  } catch (err) {
-    console.warn('Could not query profiles table directly', err);
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('display_name, role, phone, email, blocked, is_active, deleted_at, created_at')
+    .eq('id', user.id)
+    .maybeSingle();
+  if (error || !data) {
+    console.warn('Could not load the authenticated profile:', error?.message);
+    return null;
   }
-
-  const meta = user.user_metadata || {};
-  const isPendingAdmin = Boolean(meta.pending_admin_approval || cached?.pending_admin_approval);
-
-  // If role is admin in DB, clear pending
-  const resolvedRole = (cached?.role as UserRole) || dbRole;
 
   const profile: UserProfile = {
     id: user.id,
-    display_name: dbName || meta.display_name || meta.full_name || cached?.display_name || '',
-    phone: meta.phone || user.phone || cached?.phone || '',
-    email: user.email || cached?.email || '',
-    gender: meta.gender || cached?.gender || '',
-    aadhaar: meta.aadhaar || cached?.aadhaar || '',
-    role: resolvedRole,
-    pending_admin_approval: isPendingAdmin && resolvedRole !== 'admin',
-    created_at: user.created_at,
+    display_name: data.display_name || user.user_metadata?.display_name || user.user_metadata?.full_name || '',
+    phone: data.phone || user.phone || '',
+    email: data.email || user.email || '',
+    role: data.role as UserRole,
+    blocked: Boolean(data.blocked),
+    is_active: Boolean(data.is_active) && !data.deleted_at,
+    created_at: data.created_at || user.created_at,
   };
-
   localStorage.setItem(`palle_profile_${user.id}`, JSON.stringify(profile));
   return profile;
 }
 
 export async function saveProfileDetails(
   userId: string,
-  updates: { display_name?: string; phone?: string; aadhaar?: string; role?: UserRole; pending_admin_approval?: boolean }
+  updates: { display_name?: string; phone?: string }
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    // 1. Update Auth metadata
-    const { error: metaError } = await supabase.auth.updateUser({
-      data: {
-        ...(updates.display_name !== undefined ? { display_name: updates.display_name } : {}),
-        ...(updates.phone !== undefined ? { phone: updates.phone } : {}),
-        ...(updates.aadhaar !== undefined ? { aadhaar: updates.aadhaar } : {}),
-        ...(updates.pending_admin_approval !== undefined ? { pending_admin_approval: updates.pending_admin_approval } : {}),
-      },
-    });
-    if (metaError) {
-      console.warn('Error updating auth user metadata:', metaError.message);
-    }
-
-    // 2. Update DB profile if possible
-    if (updates.display_name !== undefined) {
-      await supabase
-        .from('profiles')
-        .update({ display_name: updates.display_name })
-        .eq('id', userId);
-    }
-
-    if (updates.role !== undefined) {
-      await supabase
-        .from('profiles')
-        .update({ role: updates.role })
-        .eq('id', userId);
-    }
-
-    // 3. Cache locally
+    const { error } = await supabase.from('profiles').update(updates).eq('id', userId);
+    if (error) return { success: false, error: error.message };
     const cachedRaw = localStorage.getItem(`palle_profile_${userId}`);
     const cached = cachedRaw ? JSON.parse(cachedRaw) : {};
     const updatedProfile = {
@@ -253,6 +202,7 @@ export async function saveProfileDetails(
       ...updates,
     };
     localStorage.setItem(`palle_profile_${userId}`, JSON.stringify(updatedProfile));
+    localStorage.setItem('palle_current_user', JSON.stringify(updatedProfile));
 
     return { success: true };
   } catch (err: unknown) {
@@ -261,223 +211,84 @@ export async function saveProfileDetails(
   }
 }
 
-// Admin approval queue helpers
-export function getPendingAdminRequests(): AdminApprovalRequest[] {
-  try {
-    const raw = localStorage.getItem('palle_admin_approval_queue');
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function registerAdminApprovalRequest(req: { user_id: string; display_name: string; phone: string; email: string }) {
-  const existing = getPendingAdminRequests();
-  const filtered = existing.filter((r) => r.user_id !== req.user_id);
-  filtered.push({
-    id: `req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-    user_id: req.user_id,
-    display_name: req.display_name,
-    phone: req.phone,
-    email: req.email,
-    requested_at: new Date().toISOString(),
-    status: 'pending',
-  });
-  localStorage.setItem('palle_admin_approval_queue', JSON.stringify(filtered));
-}
-
-export function resolveAdminRequest(userId: string, approve: boolean): { success: boolean } {
-  const existing = getPendingAdminRequests();
-  const updated = existing.map((r) => {
-    if (r.user_id === userId) {
-      return { ...r, status: approve ? 'approved' : 'rejected' } as AdminApprovalRequest;
-    }
-    return r;
-  });
-  localStorage.setItem('palle_admin_approval_queue', JSON.stringify(updated));
-
-  // If approved, update target user profile role
-  if (approve) {
-    const cachedRaw = localStorage.getItem(`palle_profile_${userId}`);
-    if (cachedRaw) {
-      const p = JSON.parse(cachedRaw);
-      p.role = 'admin';
-      p.pending_admin_approval = false;
-      localStorage.setItem(`palle_profile_${userId}`, JSON.stringify(p));
-    }
-    supabase.from('profiles').update({ role: 'admin' }).eq('id', userId).then(() => {});
-  }
-  return { success: true };
-}
-
-// -------------------------------------------------------------
-// Admin Privileges & User Management
-// -------------------------------------------------------------
-
-export async function checkIfFirstAdmin(): Promise<boolean> {
-  try {
-    // Check Supabase profiles for any existing admin
-    const { count, error } = await supabase
-      .from('profiles')
-      .select('*', { count: 'exact', head: true })
-      .eq('role', 'admin');
-    
-    if (!error && typeof count === 'number') {
-      if (count > 0) return false;
-    }
-
-    // Check local registry
-    const registryRaw = localStorage.getItem('palle_user_registry');
-    if (registryRaw) {
-      const registry: any[] = JSON.parse(registryRaw);
-      const hasAdmin = registry.some((u) => u.role === 'admin');
-      if (hasAdmin) return false;
-    }
-
-    return true; // No admin exists yet -> this will be the first admin
-  } catch {
-    return true;
-  }
-}
-
 export async function fetchAllUsersForAdmin(): Promise<UserProfile[]> {
-  const usersMap = new Map<string, UserProfile>();
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, display_name, phone, email, role, blocked, is_active, created_at, deleted_at')
+    .is('deleted_at', null)
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    display_name: row.display_name || 'Resident',
+    phone: row.phone || '',
+    email: row.email || '',
+    role: row.role as UserRole,
+    blocked: Boolean(row.blocked),
+    is_active: Boolean(row.is_active),
+    created_at: row.created_at,
+  }));
+}
 
-  // 1. Load from local registry
-  try {
-    const raw = localStorage.getItem('palle_user_registry');
-    if (raw) {
-      const list: any[] = JSON.parse(raw);
-      list.forEach((u) => {
-        usersMap.set(u.email?.toLowerCase() || u.id, {
-          id: u.id || `user_${u.email}`,
-          display_name: u.display_name || 'Resident',
-          phone: u.phone || '',
-          email: u.email || '',
-          role: u.role || 'citizen',
-          gender: u.gender,
-          aadhaar: u.aadhaar,
-          blocked: Boolean(u.blocked),
-          created_at: u.created_at || new Date().toISOString(),
-        });
-      });
-    }
-  } catch {}
-
-  // 2. Fetch from Supabase profiles
-  try {
-    const { data } = await supabase.from('profiles').select('*');
-    if (data && Array.isArray(data)) {
-      data.forEach((p: any) => {
-        const key = p.email?.toLowerCase() || p.id;
-        const existing = usersMap.get(key);
-        usersMap.set(key, {
-          id: p.id,
-          display_name: p.display_name || existing?.display_name || 'User',
-          phone: p.phone || existing?.phone || '',
-          email: p.email || existing?.email || '',
-          role: (p.role as UserRole) || existing?.role || 'citizen',
-          gender: p.gender || existing?.gender,
-          aadhaar: p.aadhaar || existing?.aadhaar,
-          blocked: p.blocked !== undefined ? Boolean(p.blocked) : existing?.blocked || false,
-          created_at: p.created_at || existing?.created_at,
-        });
-      });
-    }
-  } catch (err) {
-    console.warn('Could not fetch profiles for admin:', err);
-  }
-
-  return Array.from(usersMap.values());
+export async function adminUpdateUser(
+  userId: string,
+  updates: { role?: UserRole; blocked?: boolean; is_active?: boolean }
+): Promise<{ success: boolean; error?: string }> {
+  const { error } = await supabase.rpc('admin_update_user', {
+    p_user_id: userId,
+    p_role: updates.role ?? null,
+    p_blocked: updates.blocked ?? null,
+    p_is_active: updates.is_active ?? null,
+  });
+  return error ? { success: false, error: error.message } : { success: true };
 }
 
 export async function adminToggleBlockUser(
   userId: string,
-  userEmail: string,
+  _userEmail: string,
   blocked: boolean
 ): Promise<{ success: boolean; error?: string }> {
-  try {
-    // 1. Update in local registry
-    const raw = localStorage.getItem('palle_user_registry');
-    if (raw) {
-      const list: any[] = JSON.parse(raw);
-      const updated = list.map((u) => {
-        if (u.id === userId || u.email?.toLowerCase() === userEmail.toLowerCase()) {
-          return { ...u, blocked };
-        }
-        return u;
-      });
-      localStorage.setItem('palle_user_registry', JSON.stringify(updated));
-    }
+  return adminUpdateUser(userId, { blocked });
+}
 
-    // 2. Update user profile cache
-    const cachedRaw = localStorage.getItem(`palle_profile_${userId}`);
-    if (cachedRaw) {
-      const p = JSON.parse(cachedRaw);
-      p.blocked = blocked;
-      localStorage.setItem(`palle_profile_${userId}`, JSON.stringify(p));
-    }
+export async function adminEditUser(
+  userId: string,
+  updates: { display_name: string; phone: string }
+): Promise<{ success: boolean; error?: string }> {
+  const { error } = await supabase.from('profiles').update(updates).eq('id', userId);
+  return error ? { success: false, error: error.message } : { success: true };
+}
 
-    // 3. Update Supabase
-    try {
-      await supabase.from('profiles').update({ blocked }).eq('id', userId);
-    } catch {}
-
-    return { success: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Failed to update user status';
-    return { success: false, error: msg };
-  }
+export async function adminInviteUser(input: {
+  email: string;
+  display_name: string;
+  phone: string;
+  role: UserRole;
+}): Promise<{ success: boolean; message?: string; error?: string }> {
+  const { data, error } = await supabase.functions.invoke('admin-user-management', {
+    body: { action: 'invite', ...input },
+  });
+  if (error) return { success: false, error: error.message };
+  return { success: Boolean(data?.success), message: data?.message, error: data?.error };
 }
 
 export async function adminResetUserPassword(
   userId: string,
-  userEmail: string,
-  newPassword: string
+  userEmail: string
 ): Promise<{ success: boolean; error?: string }> {
-  try {
-    if (!newPassword || newPassword.length < 6) {
-      return { success: false, error: 'Password must be at least 6 characters' };
-    }
-
-    // 1. Update in local registry
-    const raw = localStorage.getItem('palle_user_registry');
-    if (raw) {
-      const list: any[] = JSON.parse(raw);
-      const updated = list.map((u) => {
-        if (u.id === userId || u.email?.toLowerCase() === userEmail.toLowerCase()) {
-          return { ...u, password: newPassword };
-        }
-        return u;
-      });
-      localStorage.setItem('palle_user_registry', JSON.stringify(updated));
-    }
-
-    return { success: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Failed to reset password';
-    return { success: false, error: msg };
-  }
+  const { data, error } = await supabase.functions.invoke('admin-user-management', {
+    body: { action: 'reset-password', user_id: userId, email: userEmail },
+  });
+  if (error) return { success: false, error: error.message };
+  return data?.success ? { success: true } : { success: false, error: data?.error || 'Could not send a reset link.' };
 }
 
-export async function adminDeleteComplaint(
-  complaintId: number
-): Promise<{ success: boolean; error?: string }> {
-  try {
-    // 1. Delete associated status updates
-    try {
-      await supabase.from('status_updates').delete().eq('complaint_id', complaintId);
-    } catch {}
+export async function adminDeleteUser(userId: string): Promise<{ success: boolean; error?: string }> {
+  const { error } = await supabase.rpc('admin_soft_delete_user', { p_user_id: userId });
+  return error ? { success: false, error: error.message } : { success: true };
+}
 
-    // 2. Delete complaint
-    const { error } = await supabase.from('complaints').delete().eq('id', complaintId);
-    if (error) {
-      console.warn('Supabase delete complaint error:', error);
-    }
-
-    return { success: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Failed to delete report';
-    return { success: false, error: msg };
-  }
+export async function adminDeleteComplaint(complaintId: number): Promise<{ success: boolean; error?: string }> {
+  const { error } = await supabase.rpc('admin_soft_delete_complaint', { p_complaint_id: complaintId });
+  return error ? { success: false, error: error.message } : { success: true };
 }

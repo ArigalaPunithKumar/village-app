@@ -1,25 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ClipboardList,
   Clock,
   Loader2,
   CheckCircle2,
   ChevronRight,
-  ThumbsUp,
   MapPin,
   Wrench,
   AlertTriangle,
-  Shield,
   Sparkles,
   Phone,
   Check,
   X,
-  Eye,
-  Filter,
-  User,
   Building2,
   Trash2,
-  Crown,
   Send,
   MessageSquare,
 } from 'lucide-react';
@@ -27,11 +21,9 @@ import {
   supabase,
   type Complaint,
   type ComplaintStatus,
+  type StatusUpdate,
   type UserRole,
   CATEGORY_META,
-  PRIORITY_META,
-  STATUS_META,
-  getPendingAdminRequests,
   adminDeleteComplaint,
 } from '@/lib/supabase';
 import CategoryIcon from './CategoryIcon';
@@ -61,6 +53,18 @@ interface ComplaintWithAction extends Complaint {
   latest_action_at?: string;
 }
 
+interface VillageMetrics {
+  citizens: number;
+  total: number;
+  pending: number;
+  in_progress: number;
+  resolved: number;
+  resolution_percent: number;
+  average_resolution_hours: number | null;
+  by_category: Record<string, number>;
+  monthly: Array<{ month: string; count: number }>;
+}
+
 export default function Dashboard({
   onNavigate,
   onSelectComplaint,
@@ -76,31 +80,29 @@ export default function Dashboard({
     urgent: 0,
   });
   const [complaints, setComplaints] = useState<ComplaintWithAction[]>([]);
+  const [villageMetrics, setVillageMetrics] = useState<VillageMetrics | null>(null);
   const [loading, setLoading] = useState(true);
-  const [feedFilter, setFeedFilter] = useState<'all' | 'urgent' | 'pending' | 'resolved'>('all');
-  const [actionBusyId, setActionBusyId] = useState<number | null>(null);
+  const [feedFilter, setFeedFilter] = useState<'all' | 'urgent' | 'pending' | 'in_progress' | 'resolved'>('all');
 
   // Sarpanch Action Modal
   const [actionModalItem, setActionModalItem] = useState<{ id: number; targetStatus: ComplaintStatus; title: string } | null>(null);
   const [actionNote, setActionNote] = useState('');
   const [submittingAction, setSubmittingAction] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Admin Delete Modal
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // Pending admin requests count
-  const pendingAdminCount = role === 'admin'
-    ? getPendingAdminRequests().filter((r) => r.status === 'pending').length
-    : 0;
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
-      const [allRes, recentRes, updatesRes] = await Promise.all([
+      const [allRes, recentRes, updatesRes, metricsRes] = await Promise.all([
         supabase.from('complaints').select('status, priority'),
         supabase.from('complaints').select('*').order('created_at', { ascending: false }).limit(30),
         supabase.from('status_updates').select('*').order('created_at', { ascending: false }),
+        isStaff ? supabase.rpc('get_village_metrics') : Promise.resolve({ data: null, error: null }),
       ]);
+      if (metricsRes.data) setVillageMetrics(metricsRes.data as VillageMetrics);
 
       const items = allRes.data ?? [];
       setStats({
@@ -116,9 +118,9 @@ export default function Dashboard({
         ).length,
       });
 
-      const updates = updatesRes.data ?? [];
+      const updates = (updatesRes.data ?? []) as StatusUpdate[];
       const list = ((recentRes.data ?? []) as Complaint[]).map((c) => {
-        const relatedUpdates = updates.filter((u: any) => u.complaint_id === c.id);
+        const relatedUpdates = updates.filter((u) => u.complaint_id === c.id);
         const latest = relatedUpdates[0];
         return {
           ...c,
@@ -134,15 +136,16 @@ export default function Dashboard({
     } finally {
       setLoading(false);
     }
-  };
+  }, [isStaff]);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    void loadData();
+  }, [loadData]);
 
   // Quick action trigger: opens action modal for Sarpanch / Staff
   const openActionModal = (e: React.MouseEvent, complaint: Complaint, targetStatus: ComplaintStatus) => {
     e.stopPropagation();
+    setActionError(null);
     setActionModalItem({ id: complaint.id, targetStatus, title: complaint.title });
     setActionNote(
       targetStatus === 'resolved'
@@ -155,47 +158,24 @@ export default function Dashboard({
   const handleConfirmAction = async () => {
     if (!actionModalItem) return;
     setSubmittingAction(true);
+    setActionError(null);
     const { id: complaintId, targetStatus } = actionModalItem;
 
     try {
-      const { error: updateError } = await supabase
-        .from('complaints')
-        .update({
-          status: targetStatus,
-          updated_at: new Date().toISOString(),
-          ...(targetStatus === 'resolved' ? { resolved_at: new Date().toISOString() } : {}),
-        })
-        .eq('id', complaintId);
-
-      if (!updateError) {
-        const updater = userName || (role === 'sarpanch' ? 'Village Sarpanch' : 'Admin');
-        try {
-          await supabase.from('status_updates').insert({
-            complaint_id: complaintId,
-            status: targetStatus,
-            note: actionNote.trim() || `Status updated to ${targetStatus} by ${updater}.`,
-            updated_by: updater,
-          });
-        } catch {}
-
-        setComplaints((prev) =>
-          prev.map((c) =>
-            c.id === complaintId
-              ? {
-                  ...c,
-                  status: targetStatus,
-                  latest_action: actionNote.trim(),
-                  latest_action_by: updater,
-                  latest_action_at: new Date().toISOString(),
-                }
-              : c
-          )
-        );
-        loadData();
+      const updater = userName || (role === 'sarpanch' ? 'Village Sarpanch' : 'Admin');
+      const { error: updateError } = await supabase.from('status_updates').insert({
+        complaint_id: complaintId,
+        status: targetStatus,
+        note: actionNote.trim() || `Status updated to ${targetStatus} by ${updater}.`,
+        updated_by: updater,
+      });
+      if (updateError) setActionError(updateError.message);
+      else {
+        setActionModalItem(null);
+        await loadData();
       }
     } finally {
       setSubmittingAction(false);
-      setActionModalItem(null);
     }
   };
 
@@ -208,9 +188,13 @@ export default function Dashboard({
   const confirmDeleteReport = async () => {
     if (!deleteConfirmId) return;
     setDeleting(true);
-    await adminDeleteComplaint(deleteConfirmId);
-    setComplaints((prev) => prev.filter((c) => c.id !== deleteConfirmId));
-    setStats((prev) => ({ ...prev, total: Math.max(0, prev.total - 1) }));
+    const result = await adminDeleteComplaint(deleteConfirmId);
+    if (result.success) {
+      setComplaints((prev) => prev.filter((c) => c.id !== deleteConfirmId));
+      setStats((prev) => ({ ...prev, total: Math.max(0, prev.total - 1) }));
+    } else {
+      setActionError(result.error || 'The complaint could not be archived.');
+    }
     setDeleting(false);
     setDeleteConfirmId(null);
   };
@@ -227,19 +211,29 @@ export default function Dashboard({
   const filteredFeed = complaints.filter((c) => {
     if (feedFilter === 'urgent') return c.priority === 'urgent' || c.priority === 'high';
     if (feedFilter === 'pending') return c.status === 'pending' || c.status === 'under_review';
+    if (feedFilter === 'in_progress') return c.status === 'in_progress';
     if (feedFilter === 'resolved') return c.status === 'resolved';
     return true;
   });
 
   return (
-    <div className="space-y-4 pb-12 animate-fade-in">
+    <div className="relative isolate z-10 space-y-4 pb-12 animate-fade-in">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none fixed inset-0 -z-10 bg-cover bg-center"
+        style={{
+          backgroundImage: "linear-gradient(rgba(248,250,252,.91), rgba(248,250,252,.96)), url('/village-home-background.png')",
+          backgroundSize: 'cover',
+          backgroundPosition: 'center 24%',
+        }}
+      />
       {/* ======================================================== */}
       {/* 1. HERO BANNER WITH SARPANCH PHOTO IN THE BACKGROUND     */}
       {/* ======================================================== */}
       <section
         className="relative overflow-hidden rounded-3xl p-6 text-white shadow-xl shadow-emerald-950/25 bg-cover bg-center animate-slide-up"
         style={{
-          backgroundImage: `linear-gradient(135deg, rgba(8, 45, 28, 0.94) 0%, rgba(10, 50, 75, 0.88) 55%, rgba(10, 35, 60, 0.70) 100%), url('/sarpanch.jpg')`,
+          backgroundImage: `linear-gradient(135deg, rgba(8, 45, 28, 0.82) 0%, rgba(10, 50, 75, 0.72) 55%, rgba(10, 35, 60, 0.70) 100%), url('/village-home-background.png')`,
           backgroundSize: 'cover',
           backgroundPosition: 'top center',
         }}
@@ -283,31 +277,26 @@ export default function Dashboard({
         </div>
       </section>
 
-      {/* ======================================================== */}
-      {/* FIRST ADMIN NOTIFICATION BANNER (IF PENDING REQUESTS)    */}
-      {/* ======================================================== */}
-      {role === 'admin' && pendingAdminCount > 0 && (
-        <div
-          onClick={() => onNavigate('profile')}
-          className="cursor-pointer rounded-2xl border border-amber-300 bg-amber-50 p-3.5 text-amber-950 shadow-sm flex items-center justify-between transition hover:bg-amber-100"
-        >
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-400 text-amber-950 font-black">
-              <Crown className="h-4 w-4" />
+      {isStaff && villageMetrics && (
+        <section className="space-y-3 rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-sm backdrop-blur-sm sm:p-5">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <MetricTile label="Registered citizens" value={villageMetrics.citizens} />
+            <MetricTile label="Resolved" value={`${villageMetrics.resolution_percent}%`} />
+            <MetricTile label="Avg. resolution" value={villageMetrics.average_resolution_hours == null ? '—' : `${villageMetrics.average_resolution_hours}h`} />
+            <MetricTile label="All complaints" value={villageMetrics.total} />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <h3 className="mb-2 text-xs font-bold text-slate-700">Issues by category</h3>
+              <div className="space-y-2">{Object.entries(villageMetrics.by_category).sort((a,b) => b[1] - a[1]).map(([category, count]) => <div key={category} className="grid grid-cols-[minmax(0,1fr)_2fr_auto] items-center gap-2 text-[10px]"><span className="truncate text-slate-600">{CATEGORY_META[category as keyof typeof CATEGORY_META]?.label || category}</span><span className="h-2 overflow-hidden rounded-full bg-slate-100"><span className="block h-full rounded-full bg-emerald-500" style={{ width: `${Math.max(4, count / Math.max(1, ...Object.values(villageMetrics.by_category)) * 100)}%` }} /></span><span className="font-bold text-slate-700">{count}</span></div>)}</div>
             </div>
             <div>
-              <p className="text-xs font-bold text-amber-950">
-                {pendingAdminCount} Pending Admin Approval Request(s)
-              </p>
-              <p className="text-[10px] text-amber-800">
-                New user requested admin privileges. Tap to accept or deny.
-              </p>
+              <h3 className="mb-2 text-xs font-bold text-slate-700">Monthly complaints</h3>
+              <div className="flex h-24 items-end gap-2">{villageMetrics.monthly.map((month) => { const top = Math.max(1, ...villageMetrics.monthly.map((entry) => entry.count)); return <div key={month.month} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1"><span className="text-[9px] font-bold text-slate-600">{month.count}</span><span className="w-full rounded-t-md bg-teal-500" style={{ height: `${Math.max(5, month.count / top * 64)}%` }} /><span className="text-[9px] text-slate-400">{new Date(month.month).toLocaleDateString('en-IN', { month: 'short' })}</span></div>; })}</div>
+              {villageMetrics.monthly.length === 0 && <p className="text-[10px] text-slate-400">No complaint history in the last six months.</p>}
             </div>
           </div>
-          <span className="text-xs font-extrabold text-amber-900 underline shrink-0">
-            Review &rarr;
-          </span>
-        </div>
+        </section>
       )}
 
       {/* ======================================================== */}
@@ -316,35 +305,55 @@ export default function Dashboard({
       <section>
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-xs font-extrabold uppercase tracking-wider text-slate-700">
-            Village Grievance Metrics
+            Complaint Overview
           </h2>
           <span className="text-[10px] font-bold text-emerald-700">Live Status</span>
         </div>
 
-        <div className="grid grid-cols-4 gap-2 text-center">
-          <div className="rounded-2xl bg-indigo-50 border border-indigo-100 p-2.5 shadow-2xs">
-            <ClipboardList className="mx-auto h-4 w-4 text-indigo-600 mb-1" />
+        <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
+          <button
+            type="button"
+            aria-pressed={feedFilter === 'all'}
+            onClick={() => setFeedFilter('all')}
+            className={`rounded-2xl border bg-white/95 p-3 shadow-sm backdrop-blur-sm transition hover:-translate-y-0.5 hover:shadow-md ${feedFilter === 'all' ? 'border-indigo-300 ring-2 ring-indigo-100' : 'border-indigo-100'}`}
+          >
+            <ClipboardList className="mx-auto mb-1 h-4 w-4 text-indigo-600" />
             <p className="text-base font-black text-indigo-900">{stats.total}</p>
-            <p className="text-[9px] font-bold text-indigo-600">Total</p>
-          </div>
+            <p className="text-[10px] font-bold text-indigo-700">Everything</p>
+          </button>
 
-          <div className="rounded-2xl bg-amber-50 border border-amber-100 p-2.5 shadow-2xs">
-            <Clock className="mx-auto h-4 w-4 text-amber-600 mb-1" />
+          <button
+            type="button"
+            aria-pressed={feedFilter === 'pending'}
+            onClick={() => setFeedFilter('pending')}
+            className={`rounded-2xl border bg-white/95 p-3 shadow-sm backdrop-blur-sm transition hover:-translate-y-0.5 hover:shadow-md ${feedFilter === 'pending' ? 'border-amber-300 ring-2 ring-amber-100' : 'border-amber-100'}`}
+          >
+            <Clock className="mx-auto mb-1 h-4 w-4 text-amber-600" />
             <p className="text-base font-black text-amber-900">{stats.pending}</p>
-            <p className="text-[9px] font-bold text-amber-600">Review</p>
-          </div>
+            <p className="text-[10px] font-bold text-amber-700">Pending review</p>
+          </button>
 
-          <div className="rounded-2xl bg-sky-50 border border-sky-100 p-2.5 shadow-2xs">
-            <Wrench className="mx-auto h-4 w-4 text-sky-600 mb-1" />
+          <button
+            type="button"
+            aria-pressed={feedFilter === 'in_progress'}
+            onClick={() => setFeedFilter('in_progress')}
+            className={`rounded-2xl border bg-white/95 p-3 shadow-sm backdrop-blur-sm transition hover:-translate-y-0.5 hover:shadow-md ${feedFilter === 'in_progress' ? 'border-sky-300 ring-2 ring-sky-100' : 'border-sky-100'}`}
+          >
+            <Wrench className="mx-auto mb-1 h-4 w-4 text-sky-600" />
             <p className="text-base font-black text-sky-900">{stats.inProgress}</p>
-            <p className="text-[9px] font-bold text-sky-600">Working</p>
-          </div>
+            <p className="text-[10px] font-bold text-sky-700">In progress</p>
+          </button>
 
-          <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-2.5 shadow-2xs">
-            <CheckCircle2 className="mx-auto h-4 w-4 text-emerald-600 mb-1" />
+          <button
+            type="button"
+            aria-pressed={feedFilter === 'resolved'}
+            onClick={() => setFeedFilter('resolved')}
+            className={`rounded-2xl border bg-white/95 p-3 shadow-sm backdrop-blur-sm transition hover:-translate-y-0.5 hover:shadow-md ${feedFilter === 'resolved' ? 'border-emerald-300 ring-2 ring-emerald-100' : 'border-emerald-100'}`}
+          >
+            <CheckCircle2 className="mx-auto mb-1 h-4 w-4 text-emerald-600" />
             <p className="text-base font-black text-emerald-900">{stats.resolved}</p>
-            <p className="text-[9px] font-bold text-emerald-600">Resolved</p>
-          </div>
+            <p className="text-[10px] font-bold text-emerald-700">Resolved cases</p>
+          </button>
         </div>
       </section>
 
@@ -360,7 +369,7 @@ export default function Dashboard({
             <p className="text-[11px] text-slate-500">
               {isStaff
                 ? 'Scroll through citizen issues and update status directly.'
-                : 'Public grievances reported in Tandlam Panchayat.'}
+              : 'Your submitted complaints and their current status.'}
             </p>
           </div>
 
@@ -384,7 +393,7 @@ export default function Dashboard({
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
           >
-            All ({stats.total})
+            Everything ({stats.total})
           </button>
           <button
             onClick={() => setFeedFilter('urgent')}
@@ -409,6 +418,17 @@ export default function Dashboard({
             Pending ({stats.pending})
           </button>
           <button
+            onClick={() => setFeedFilter('in_progress')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1 ${
+              feedFilter === 'in_progress'
+                ? 'bg-sky-600 text-white shadow-xs'
+                : 'bg-sky-50 text-sky-800 hover:bg-sky-100'
+            }`}
+          >
+            <Wrench className="h-3 w-3" />
+            In progress ({stats.inProgress})
+          </button>
+          <button
             onClick={() => setFeedFilter('resolved')}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1 ${
               feedFilter === 'resolved'
@@ -417,7 +437,7 @@ export default function Dashboard({
             }`}
           >
             <CheckCircle2 className="h-3 w-3" />
-            Resolved ({stats.resolved})
+            Resolved cases ({stats.resolved})
           </button>
         </div>
 
@@ -425,8 +445,14 @@ export default function Dashboard({
         {filteredFeed.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-slate-200 bg-white p-8 text-center">
             <ClipboardList className="mx-auto h-8 w-8 text-slate-300 mb-2" />
-            <p className="text-xs font-bold text-slate-600">No complaints in this category.</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">All clear in Tandlam Panchayat!</p>
+            <p className="text-xs font-bold text-slate-700">
+              {isStaff ? 'No complaints match this category.' : 'No reports in this category yet.'}
+            </p>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              {isStaff
+                ? 'New submissions will appear here as soon as residents report them.'
+                : 'Your complaints and their status updates will appear here.'}
+            </p>
           </div>
         ) : (
           <div className="space-y-3.5">
@@ -552,7 +578,7 @@ export default function Dashboard({
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          disabled={actionBusyId === complaint.id || complaint.status === 'in_progress'}
+                          disabled={submittingAction || complaint.status === 'in_progress'}
                           onClick={(e) => openActionModal(e, complaint, 'in_progress')}
                           className="inline-flex items-center gap-1 rounded-xl bg-sky-50 px-3 py-1.5 text-xs font-bold text-sky-800 hover:bg-sky-100 active:scale-95 disabled:opacity-40 border border-sky-200"
                         >
@@ -562,7 +588,7 @@ export default function Dashboard({
 
                         <button
                           type="button"
-                          disabled={actionBusyId === complaint.id || complaint.status === 'resolved'}
+                          disabled={submittingAction || complaint.status === 'resolved'}
                           onClick={(e) => openActionModal(e, complaint, 'resolved')}
                           className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 active:scale-95 disabled:opacity-40 shadow-xs"
                         >
@@ -613,6 +639,8 @@ export default function Dashboard({
             <p className="text-xs font-semibold text-slate-700 line-clamp-1">
               Issue: "{actionModalItem.title}"
             </p>
+
+            {actionError && <p role="alert" className="rounded-xl bg-rose-50 p-2.5 text-xs text-rose-800">{actionError}</p>}
 
             <div>
               <label className="mb-1 block text-xs font-bold text-slate-700">
@@ -686,10 +714,10 @@ export default function Dashboard({
 
             <div className="text-center">
               <h3 className="text-base font-black text-slate-900">Delete Grievance Report</h3>
-              <p className="mt-1 text-xs text-slate-500 leading-relaxed">
-                As Admin, are you sure you want to permanently delete this report? This action cannot be undone.
-              </p>
+              <p className="mt-1 text-xs text-slate-500 leading-relaxed">Archive this complaint from active lists? Its history will be retained for accountability.</p>
             </div>
+
+            {actionError && <p role="alert" className="rounded-xl bg-rose-50 p-2 text-xs text-rose-700">{actionError}</p>}
 
             <div className="grid grid-cols-2 gap-3 pt-2">
               <button
@@ -714,4 +742,8 @@ export default function Dashboard({
       )}
     </div>
   );
+}
+
+function MetricTile({ label, value }: { label: string; value: string | number }) {
+  return <div className="rounded-xl border border-slate-100 bg-slate-50 p-3"><p className="text-[10px] font-semibold text-slate-500">{label}</p><p className="mt-1 text-lg font-black text-slate-900">{value}</p></div>;
 }

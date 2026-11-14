@@ -23,6 +23,7 @@ import PriorityBadge from './PriorityBadge';
 interface ComplaintListProps {
   onSelectComplaint: (id: number) => void;
   isStaff?: boolean;
+  initialStatusFilter?: ComplaintStatus | 'all';
 }
 
 type SortKey = 'newest' | 'oldest' | 'upvotes';
@@ -36,15 +37,19 @@ const STATUS_PILLS: (ComplaintStatus | 'all')[] = [
   'rejected',
 ];
 
-export default function ComplaintList({ onSelectComplaint }: ComplaintListProps) {
+export default function ComplaintList({ onSelectComplaint, initialStatusFilter = 'all' }: ComplaintListProps) {
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<ComplaintStatus | 'all'>('all');
+  const [statusFilter, setStatusFilter] = useState<ComplaintStatus | 'all'>(initialStatusFilter);
   const [categoryFilter, setCategoryFilter] = useState<ComplaintCategory | 'all'>('all');
   const [sortKey, setSortKey] = useState<SortKey>('newest');
   const [showFilters, setShowFilters] = useState(false);
   const [upvotedIds, setUpvotedIds] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    setStatusFilter(initialStatusFilter);
+  }, [initialStatusFilter]);
 
   useEffect(() => {
     async function load() {
