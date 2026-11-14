@@ -66,9 +66,7 @@ supabase db push
 supabase functions deploy admin-user-management
 ```
 
-New signups are always Citizens. To let a new Citizen use the app immediately with the same email and password, turn off **Confirm email** for the Email provider in Supabase Dashboard → Authentication → Sign In / Providers. With confirmation enabled, Supabase intentionally returns no session until the address is verified, so the app cannot sign the new account in automatically.
-
-Turning off confirmation also means Supabase treats any supplied email as verified. Use this only if that tradeoff is acceptable for your village. To bootstrap the first Admin, register the intended email as a Citizen, then run this once in the Supabase SQL editor:
+New signups are always Citizens. Users register with their email address, mobile number, and password, and are signed in immediately. To bootstrap the first Admin, register the intended email as a Citizen, then run this once in the Supabase SQL editor:
 
 ```sql
 UPDATE public.profiles

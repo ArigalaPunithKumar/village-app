@@ -82,10 +82,12 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
       });
       if (signInError) {
         const errMsg = signInError.message.toLowerCase();
-        if (errMsg.includes('invalid login credentials') || errMsg.includes('invalid credentials')) {
+        if (
+          errMsg.includes('invalid login credentials') ||
+          errMsg.includes('invalid credentials') ||
+          errMsg.includes('email not confirmed')
+        ) {
           setError('Invalid email or password. Please verify and try again.');
-        } else if (errMsg.includes('email not confirmed')) {
-          setError('Please confirm your email address before signing in.');
         } else {
           setError(signInError.message);
         }
@@ -174,7 +176,22 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
           onAuthenticated(profile);
         }
       } else {
-        setError('The account was created, but Supabase did not start a session. Disable email confirmations in Supabase Auth settings so email and password sign-in works immediately after registration.');
+        // Automatically attempt sign-in so user is logged in immediately
+        const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (!signInErr && signInData.session) {
+          const profile = await fetchCurrentProfile();
+          if (profile) {
+            onAuthenticated(profile);
+            return;
+          }
+        }
+        setMode('signin');
+        setLoginEmail(email);
+        setLoginPassword(password);
+        setError('Account created successfully. Please sign in with your password.');
       }
     } catch {
       setError('Could not create the account. Check your connection and try again.');
